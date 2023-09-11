@@ -8,26 +8,27 @@ use anyhow::Context;
 
 mod cpu;
 use cpu::*;
-mod memory;
-use memory::*;
-mod budget;
-use budget::*;
+mod execution;
+use execution::*;
 
 pub struct BoxSpace {
     ram: Vec<u32>,
+    reserved_addr: u32,
 }
+const NO_RESERVED_ADDR: u32 = !0;
 
 impl BoxSpace {
     pub fn new() -> BoxSpace {
         BoxSpace {
-            ram: vec![0; 1 << 23],
+            ram: vec![0; 1 << 22],
+            reserved_addr: NO_RESERVED_ADDR,
         }
     }
     pub fn ram(&self) -> &[u32] { &self.ram[..] }
     pub fn ram_mut(&mut self) -> &mut [u32] { &mut self.ram[..] }
 }
 
-impl Memory for BoxSpace {
+impl ExecutionEnvironment for BoxSpace {
     fn read_word(&mut self, address: u32, _mask: u32) -> Result<u32, MemoryAccessFailure> {
         if address & 3 != 0 {
             return Err(MemoryAccessFailure::Unaligned)
@@ -48,6 +49,9 @@ impl Memory for BoxSpace {
         if address & 3 != 0 {
             return Err(MemoryAccessFailure::Unaligned)
         }
+        if address == self.reserved_addr {
+            self.reserved_addr = NO_RESERVED_ADDR;
+        }
         if (address as usize) < self.ram.len() << 2 {
             let target = &mut self.ram[(address >> 2) as usize];
             *target = (*target & !mask) | (data & mask);
@@ -60,6 +64,25 @@ impl Memory for BoxSpace {
         }
         Ok(())
     }
+    fn load_reserved_word(&mut self, address: u32) -> Result<u32, MemoryAccessFailure> {
+        if address & 3 != 0 {
+            return Err(MemoryAccessFailure::Unaligned)
+        }
+        let ret = self.read_word(address, !0)?;
+        self.reserved_addr = address;
+        Ok(ret)
+    }
+    fn store_reserved_word(&mut self, address: u32, data: u32) -> Result<bool, MemoryAccessFailure> {
+        if address & 3 != 0 {
+            return Err(MemoryAccessFailure::Unaligned)
+        }
+        if self.reserved_addr != address {
+            return Ok(false)
+        }
+        self.write_word(address, data, !0)?;
+        self.reserved_addr = NO_RESERVED_ADDR;
+        Ok(true)
+    }
 }
 
 
@@ -70,11 +93,12 @@ fn main() {
         std::process::exit(1);
     }
     let infile = File::open(&args[1]).context("Unable to open the target file").unwrap();
-    let mut memory = BoxSpace::new();
-    ipl::initial_program_load(memory.ram_mut(), BufReader::new(infile)).unwrap();
-    let mut cpu = Cpu::new();
+    let mut env = BoxSpace::new();
+    ipl::initial_program_load(env.ram_mut(), BufReader::new(infile)).unwrap();
+    let mut cpu = Cpu::<()>::new();
+    dbg!(std::mem::size_of_val(&cpu));
     loop {
-        cpu.step(&mut memory, &mut ());
+        cpu.step(&mut env).unwrap();
     }
 }
 

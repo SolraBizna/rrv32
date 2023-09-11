@@ -7,3 +7,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.72"
+rustc_apfloat = {version = "0.2.0", optional = true}
+ieee-apsqrt = "0.1.0"
+
+[features]
+default = ["float"]
+float = ["rustc_apfloat"]
