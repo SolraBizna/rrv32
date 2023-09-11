@@ -89,7 +89,7 @@ impl ExecutionEnvironment for BoxSpace {
 fn main() {
     let args: Vec<OsString> = std::env::args_os().collect();
     if args.len() != 2 {
-        eprintln!("Usage: rv32box path/to/input.txt");
+        eprintln!("Usage: rrv32 path/to/input.txt");
         std::process::exit(1);
     }
     let infile = File::open(&args[1]).context("Unable to open the target file").unwrap();

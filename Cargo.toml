@@ -1,5 +1,5 @@
 [package]
-name = "rv32box"
+name = "rrv32"
 version = "0.1.0"
 edition = "2021"
 

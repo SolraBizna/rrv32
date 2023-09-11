@@ -24,6 +24,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rrv32"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ieee-apsqrt",
+ "rustc_apfloat",
+]
+
+[[package]]
 name = "rustc_apfloat"
 version = "0.2.0+llvm-462a31f5a5ab"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -31,15 +40,6 @@ checksum = "465187772033a5ee566f69fe008df03628fce549a0899aae76f0a0c2e34696be"
 dependencies = [
  "bitflags",
  "smallvec",
-]
-
-[[package]]
-name = "rv32box"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ieee-apsqrt",
- "rustc_apfloat",
 ]
 
 [[package]]
