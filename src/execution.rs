@@ -15,12 +15,6 @@ pub trait ExecutionEnvironment<F: FloatBits = ()> {
     const SUPPORT_M: bool = true;
     /// Set to true (default) if the A extension should be supported.
     const SUPPORT_A: bool = true;
-    /// Set to true (default) to pretend to emulate any valid rounding mode,
-    /// even though we only support "RMM" (round max magnitude) mode. Set to
-    /// false to trigger an illegal instruction exception any time a rounding
-    /// mode other than "RMM" is used. Doesn't matter if you have an empty `F`
-    /// type.
-    const USE_RELAXED_ROUNDING: bool = true;
     /// Read an entire word from memory. `mask` indicates which byte lanes are
     /// active. Return `Err(Unaligned)` if address is not aligned to a four-
     /// byte boundary, **OR** determine and implement unaligned memory access
