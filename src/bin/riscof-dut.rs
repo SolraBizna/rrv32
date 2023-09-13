@@ -379,12 +379,12 @@ impl<const A: bool, const M: bool> ExecutionEnvironment for Elfo<A,M> {
         if self.reserved_addr != address { return Ok(false) }
         self.write_word(address, data, !0).map(|_| true)
     }
-    fn csr_access<F:FloatBits>(&mut self, cpu: &mut Cpu<F>, csr_number: u32, handler: impl Fn(&mut Cpu<F>, u32) -> u32) -> Result<u32, ExceptionCause> {
+    fn csr_access<F:FloatBits>(&mut self, cpu: &mut Cpu<F>, csr_number: u32, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32, ExceptionCause> {
         if F::SUPPORT_F {
             match csr_number {
-                0x001 => return cpu.access_fflags(handler),
-                0x002 => return cpu.access_frm(handler),
-                0x003 => return cpu.access_fcsr(handler),
+                0x001 => return cpu.access_fflags(handler, operand),
+                0x002 => return cpu.access_frm(handler, operand),
+                0x003 => return cpu.access_fcsr(handler, operand),
                 _ => (),
             }
         }

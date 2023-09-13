@@ -532,7 +532,7 @@ impl<F: FloatBits> Cpu<F> {
                         // FENCE
                         // (treat as no-op)
                     }
-                    0b001 => {
+                    0b001 if env.enable_zifence() => {
                         // FENCE.I from Zifence
                         // (treat as no-op)
                     }
@@ -1087,75 +1087,9 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_jump_op();
             }
             0b11100 => {
-                match funct3!() {
-                    // the CSR* code could be condensed considerably
-                    0b001 => {
-                        // CSRRW
-                        let res = env.csr_access(
-                            self,
-                            csr!(),
-                            |cpu, _old_value| {
-                                cpu.get_register(rs1!())
-                            },
-                        ).map_err(|x| (x, instruction))?;
-                        self.put_register(rd!(), res)
-                    }
-                    0b010 => {
-                        // CSRRS
-                        let res = env.csr_access(
-                            self,
-                            csr!(),
-                            |cpu, old_value| {
-                                old_value | cpu.get_register(rs1!())
-                            },
-                        ).map_err(|x| (x, instruction))?;
-                        self.put_register(rd!(), res)
-                    }
-                    0b011 => {
-                        // CSRRC
-                        let res = env.csr_access(
-                            self,
-                            csr!(),
-                            |cpu, old_value| {
-                                old_value & !cpu.get_register(rs1!())
-                            },
-                        ).map_err(|x| (x, instruction))?;
-                        self.put_register(rd!(), res)
-                    }
-                    0b101 => {
-                        // CSRRWI
-                        let res = env.csr_access(
-                            self,
-                            csr!(),
-                            |_cpu, _old_value| {
-                                rs1!()
-                            },
-                        ).map_err(|x| (x, instruction))?;
-                        self.put_register(rd!(), res)
-                    }
-                    0b110 => {
-                        // CSRRSI
-                        let res = env.csr_access(
-                            self,
-                            csr!(),
-                            |_cpu, old_value| {
-                                old_value | rs1!()
-                            },
-                        ).map_err(|x| (x, instruction))?;
-                        self.put_register(rd!(), res)
-                    }
-                    0b111 => {
-                        // CSRRCI
-                        let res = env.csr_access(
-                            self,
-                            csr!(),
-                            |_cpu, old_value| {
-                                old_value & !rs1!()
-                            },
-                        ).map_err(|x| (x, instruction))?;
-                        self.put_register(rd!(), res)
-                    }
-                    _ => match instruction {
+                // SYSTEM
+                if funct3!() == 0 {
+                    match instruction {
                         0b000000000000_00000_000_00000_1110011 => {
                             // ECALL
                             env.perform_ecall(self)?;
@@ -1168,6 +1102,26 @@ impl<F: FloatBits> Cpu<F> {
                             return Err((ExceptionCause::IllegalInstruction,0))
                         }
                     }
+                } else {
+                    let (handler, source_value): (fn(u32,u32)->u32, u32) = match funct3!() {
+                        // CSRRW
+                        0b001 => (|_old_value, new_value| { new_value }, self.get_register(rs1!())),
+                        // CSRRS
+                        0b010 => (|old_value, new_value| { old_value | new_value }, self.get_register(rs1!())),
+                        // CSRRC
+                        0b011 => (|old_value, new_value| { old_value & !new_value }, self.get_register(rs1!())),
+                        // CSRRWI
+                        0b101 => (|_old_value, new_value| { new_value }, rs1!()),
+                        // CSRRSI
+                        0b110 => (|old_value, new_value| { old_value | new_value }, rs1!()),
+                        // CSRRCI
+                        0b111 => (|old_value, new_value| { old_value & !new_value }, rs1!()),
+                        _ => {
+                            return Err((ExceptionCause::IllegalInstruction,0))
+                        }
+                    };
+                    let result = env.csr_access(self, csr!(), handler, source_value).map_err(|x| (x, instruction))?;
+                    self.put_register(rd!(), result);
                 }
             }
             _ => {
@@ -1205,28 +1159,28 @@ impl<F: FloatBits> Cpu<F> {
     }
     /// Access the `fflags` CSR. If you are not using floating point, will
     /// just raise an illegal instruction exception.
-    pub fn access_fflags(&mut self, handler: impl Fn(&mut Cpu<F>, u32) -> u32) -> Result<u32,ExceptionCause> {
+    pub fn access_fflags(&mut self, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32,ExceptionCause> {
         if !F::SUPPORT_F { return Err(ExceptionCause::IllegalInstruction) }
         let old_value = F::read_csr(&self.fcsr);
-        let new_value = (handler(self, old_value) & 0b11111) | (old_value & !0b11111);
+        let new_value = (handler(old_value, operand) & 0b11111) | (old_value & !0b11111);
         F::write_csr(&mut self.fcsr, new_value);
         Ok(old_value & 0b11111)
     }
     /// Access the `frm` CSR. If you are not using floating point, will
     /// just raise an illegal instruction exception.
-    pub fn access_frm(&mut self, handler: impl Fn(&mut Cpu<F>, u32) -> u32) -> Result<u32,ExceptionCause> {
+    pub fn access_frm(&mut self, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32,ExceptionCause> {
         if !F::SUPPORT_F { return Err(ExceptionCause::IllegalInstruction) }
         let old_value = F::read_csr(&self.fcsr);
-        let new_value = ((handler(self, old_value) & 0b111) << 5) | (old_value & !0b111_00000);
+        let new_value = ((handler(old_value, operand) & 0b111) << 5) | (old_value & !0b111_00000);
         F::write_csr(&mut self.fcsr, new_value);
         Ok((old_value >> 5) & 0b111)
     }
     /// Access the `fcsr` CSR. If you are not using floating point, will
     /// just raise an illegal instruction exception.
-    pub fn access_fcsr(&mut self, handler: impl Fn(&mut Cpu<F>, u32) -> u32) -> Result<u32,ExceptionCause> {
+    pub fn access_fcsr(&mut self, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32,ExceptionCause> {
         if !F::SUPPORT_F { return Err(ExceptionCause::IllegalInstruction) }
         let old_value = F::read_csr(&self.fcsr);
-        let new_value = (handler(self, old_value) & 0b111_11111) | (old_value & !0b111_11111);
+        let new_value = (handler(old_value, operand) & 0b111_11111) | (old_value & !0b111_11111);
         F::write_csr(&mut self.fcsr, new_value);
         Ok(old_value & 0b111_11111)
     }
