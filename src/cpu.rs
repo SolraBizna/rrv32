@@ -170,7 +170,7 @@ impl<F: FloatBits> Cpu<F> {
             panic!("register {index} out of range")
         }
     }
-    fn perform_amo<Env: ExecutionEnvironment<F>>(&mut self, env: &mut Env, amop: u32, rd: u32, rs1: u32, rs2: u32, _aq: bool, _rl: bool, instruction: u32) -> Result<(),(ExceptionCause,u32)> {
+    fn perform_amo<Env: ExecutionEnvironment>(&mut self, env: &mut Env, amop: u32, rd: u32, rs1: u32, rs2: u32, _aq: bool, _rl: bool, instruction: u32) -> Result<(),(ExceptionCause,u32)> {
         let addr = self.get_register(rs1);
         // |mem, reg| -> mem
         let amop: fn(u32, u32) -> u32 = match amop {
@@ -238,7 +238,7 @@ impl<F: FloatBits> Cpu<F> {
         Ok(())
     }
     /// Error result is `(mcause, mtval)`.
-    fn internal_step<Env: ExecutionEnvironment<F>>(&mut self, env: &mut Env) -> Result<(), (ExceptionCause, u32)> {
+    fn internal_step<Env: ExecutionEnvironment>(&mut self, env: &mut Env) -> Result<(), (ExceptionCause, u32)> {
         let this_pc = self.get_pc();
         let instruction = map_ifetch(this_pc, env.read_word(this_pc, !0))?;
         if instruction & 0b11 != 0b11 {
@@ -1193,7 +1193,7 @@ impl<F: FloatBits> Cpu<F> {
     /// Fetch, decode, and execute a single instruction. `Ok(())` means an
     /// instruction was retired successfully. `Err(...)` means an exception
     /// occurred instead.
-    pub fn step<Env: ExecutionEnvironment<F>>(&mut self, env: &mut Env) -> Result<(), Exception> {
+    pub fn step<Env: ExecutionEnvironment>(&mut self, env: &mut Env) -> Result<(), Exception> {
         self.internal_step(env)
             .map_err(|(mcause, mtval)| {
                 Exception {

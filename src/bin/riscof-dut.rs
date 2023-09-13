@@ -337,7 +337,7 @@ impl<const A: bool, const M: bool> Elfo<A, M> {
     }
 }
 
-impl<F: FloatBits, const A: bool, const M: bool> ExecutionEnvironment<F> for Elfo<A,M> {
+impl<const A: bool, const M: bool> ExecutionEnvironment for Elfo<A,M> {
     const SUPPORT_A: bool = A;
     const SUPPORT_M: bool = M;
     fn read_word(&mut self, address: u32, _mask: u32) -> Result<u32, rrv32::MemoryAccessFailure> {
@@ -368,7 +368,7 @@ impl<F: FloatBits, const A: bool, const M: bool> ExecutionEnvironment<F> for Elf
     }
     fn load_reserved_word(&mut self, address: u32) -> Result<u32, rrv32::MemoryAccessFailure> {
         if address % 4 != 0 { return Err(MemoryAccessFailure::Unaligned) }
-        let ret = <Elfo<A,M> as ExecutionEnvironment<F>>::read_word(self, address, !0);
+        let ret = self.read_word(address, !0);
         if ret.is_ok() {
             self.reserved_addr = address;
         }
@@ -377,9 +377,9 @@ impl<F: FloatBits, const A: bool, const M: bool> ExecutionEnvironment<F> for Elf
     fn store_reserved_word(&mut self, address: u32, data: u32) -> Result<bool, rrv32::MemoryAccessFailure> {
         if address % 4 != 0 { return Err(MemoryAccessFailure::Unaligned) }
         if self.reserved_addr != address { return Ok(false) }
-        <Elfo<A,M> as ExecutionEnvironment<F>>::write_word(self, address, data, !0).map(|_| true)
+        self.write_word(address, data, !0).map(|_| true)
     }
-    fn csr_access(&mut self, cpu: &mut Cpu<F>, csr_number: u32, handler: impl Fn(&mut Cpu<F>, u32) -> u32) -> Result<u32, ExceptionCause> {
+    fn csr_access<F:FloatBits>(&mut self, cpu: &mut Cpu<F>, csr_number: u32, handler: impl Fn(&mut Cpu<F>, u32) -> u32) -> Result<u32, ExceptionCause> {
         if F::SUPPORT_F {
             match csr_number {
                 0x001 => return cpu.access_fflags(handler),
@@ -427,7 +427,7 @@ fn run_inner<F: FloatBits, const A: bool, const M: bool>(signature_path: &str, m
     assert!(sig_end % 4 == 0);
     let mut f = File::create(signature_path).unwrap();
     for sigaddr in (sig_begin .. sig_end).step_by(4) {
-        write!(f, "{:08x}\n", <Elfo<A,M> as ExecutionEnvironment<F>>::read_word(&mut elfo, sigaddr, !0).unwrap()).unwrap();
+        write!(f, "{:08x}\n", elfo.read_word(sigaddr, !0).unwrap()).unwrap();
     }
 }
 
