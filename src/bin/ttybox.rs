@@ -6,10 +6,7 @@ use std::{
 
 use anyhow::Context;
 
-mod cpu;
-use cpu::*;
-mod execution;
-use execution::*;
+use rrv32::*;
 
 pub struct BoxSpace {
     ram: Vec<u32>,
@@ -96,7 +93,6 @@ fn main() {
     let mut env = BoxSpace::new();
     ipl::initial_program_load(env.ram_mut(), BufReader::new(infile)).unwrap();
     let mut cpu = Cpu::<()>::new();
-    dbg!(std::mem::size_of_val(&cpu));
     loop {
         cpu.step(&mut env).unwrap();
     }

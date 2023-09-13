@@ -11,8 +11,8 @@ pub const CANON_NAN_32: u32 = 0x7fc00000;
 pub const CANON_NAN_64: u64 = 0x7ff80000_00000000;
 pub const CANON_NAN_128: u128 = 0x7fff8000_00000000_00000000_00000000;
 
-// RMM rounding mode, no accrued exceptions
-const DEFAULT_CSR: u32 = 0b100_00000;
+// RNE rounding mode, no accrued exceptions
+const DEFAULT_CSR: u32 = 0b000_00000;
 // exceptions!
 pub const INVALID_FLAG: u32 = 0b10000;
 pub const ZERO_DIV_FLAG: u32 = 0b01000;
@@ -136,7 +136,7 @@ pub fn maybe_unstatus<T: MaybeUnstatus, F: FloatBits>(cpu: &mut super::Cpu<F>, x
         if status.contains(Status::OVERFLOW) { q |= OVERFLOW_FLAG; }
         if status.contains(Status::UNDERFLOW) { q |= UNDERFLOW_FLAG; }
         if status.contains(Status::INEXACT) { q |= INEXACT_FLAG; }
-        if q != 0 { cpu.float_exceptions(q) }
+        if q != 0 { cpu.accrue_float_exceptions(q) }
     });
     x.to_inner()
 }

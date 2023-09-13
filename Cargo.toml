@@ -2,13 +2,14 @@
 name = "rrv32"
 version = "0.1.0"
 edition = "2021"
+default-run = "ttybox"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1.0.72"
 rustc_apfloat = {version = "0.2.0", optional = true}
-ieee-apsqrt = "0.1.0"
+ieee-apsqrt = "0.1.1"
 
 [features]
 default = ["float"]

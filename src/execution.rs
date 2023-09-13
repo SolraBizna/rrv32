@@ -25,7 +25,7 @@ pub trait ExecutionEnvironment<F: FloatBits = ()> {
     /// aligned to a four-byte boundary, **OR** determine and implement
     /// unaligned memory access logic yourself.
     fn read_half(&mut self, address: u32) -> Result<u16, MemoryAccessFailure> {
-        if address & 2 != 0 { return Err(MemoryAccessFailure::Unaligned) }
+        if address & 1 != 0 { return Err(MemoryAccessFailure::Unaligned) }
         let lanes = if address & 2 != 0 { 0xFFFF0000 } else { 0x0000FFFF };
         let word = self.read_word(address & !3, lanes)?;
         Ok(if address & 2 != 0 { (word >> 16) as u16 } else { word as u16 })
@@ -44,7 +44,7 @@ pub trait ExecutionEnvironment<F: FloatBits = ()> {
     /// boundary. Default implementation calls `write_word` with an appropriate
     /// mask and the value "splatted".
     fn write_half(&mut self, address: u32, data: u16) -> Result<(), MemoryAccessFailure> {
-        if address & 2 != 0 { return Err(MemoryAccessFailure::Unaligned) }
+        if address & 1 != 0 { return Err(MemoryAccessFailure::Unaligned) }
         let lanes = if address & 2 != 0 { 0xFFFF0000 } else { 0x0000FFFF };
         self.write_word(address & !3, (data as u32) << 16 | (data as u32), lanes)
     }
@@ -87,7 +87,9 @@ pub trait ExecutionEnvironment<F: FloatBits = ()> {
     }
     /// Handle a `CSR*` instruction. Pass the current value to the provided
     /// closure, use the closure's return value as a new value, and return the
-    /// old value.
+    /// old value. The default implementation provides the minimum to make
+    /// F/D/Q functional and no others. You should implement those, as well as
+    /// `misa` and the timers.
     ///
     /// The default implementation calls `cpu.access_fflags`, `cpu.access_frm`,
     /// and `cpu.access_fcsr` for the floating point status registers, iff

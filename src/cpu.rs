@@ -26,9 +26,9 @@ mod float {
 }
 pub use float::FloatBits;
 #[cfg(feature="float")]
-use float::WordyFloat;
+use float::*;
 #[cfg(feature="float")]
-use rustc_apfloat::{Float, FloatConvert, ieee::{Single, Double, Quad}, StatusAnd};
+use rustc_apfloat::{Float, FloatConvert, ieee::{Single, Double, Quad}, Status, StatusAnd};
 
 /// Exceptions that can occur during execution of an instruction. Values
 /// correspond to `mcause` values.
@@ -702,7 +702,7 @@ impl<F: FloatBits> Cpu<F> {
             0b10010 => {
                 // FNMADD.{S,D,Q}
                 float_op!(T; o = a, b, c; {
-                    o = a.mul_add_r(-b, c, round_mode!());
+                    o = a.mul_add_r(-b, -c, round_mode!());
                     env.account_float_ternop(T::get_word_count());
                 });
             }
@@ -710,7 +710,7 @@ impl<F: FloatBits> Cpu<F> {
             0b10011 => {
                 // FNMSUB.{S,D,Q}
                 float_op!(T; o = a, b, c; {
-                    o = a.mul_add_r(-b, -c, round_mode!());
+                    o = a.mul_add_r(-b, c, round_mode!());
                     env.account_float_ternop(T::get_word_count());
                 });
             }
@@ -719,7 +719,7 @@ impl<F: FloatBits> Cpu<F> {
                 // most float ops
                 match rs3!() {
                     0b00000 => float_op!(T; o = a, b; {
-                        o = a.add_r(b, round_mode!()); // FADD.{S,D,Q}
+                        o = a.add_r(b, round_mode!()); // FADD.{S,D,Q}\
                         env.account_float_binop(T::get_word_count());
                     }),
                     0b00001 => float_op!(T; o = a, b; {
@@ -732,15 +732,25 @@ impl<F: FloatBits> Cpu<F> {
                     }),
                     0b00011 => float_op!(T; o = a, b; {
                         // FDIV.{S,D,Q}
-                        if b.is_zero() {
-                            let out_sign = a.is_negative() != b.is_negative();
-                            if out_sign {
-                                o = T::INFINITY;
+                        if a.is_nan() || b.is_nan() {
+                            o = StatusAnd { value: T::NAN, status: if a.is_signaling() || b.is_signaling() { Status::INVALID_OP } else { Status::OK } };
+                        } else if b.is_zero() {
+                            if a.is_zero() {
+                                o = StatusAnd { value: T::NAN, status: Status::INVALID_OP };
                             } else {
-                                o = -T::INFINITY;
+                                let out_sign = a.is_negative() != b.is_negative();
+                                if out_sign {
+                                    o = StatusAnd { value: -T::INFINITY, status: Status::DIV_BY_ZERO };
+                                } else {
+                                    o = StatusAnd { value: T::INFINITY, status: Status::DIV_BY_ZERO };
+                                }
                             }
                         } else {
-                            o = float::maybe_unstatus(self, a.div_r(b, round_mode!()));
+                            o = a.div_r(b, round_mode!());
+                        }
+                        // Bug in APFloat?
+                        if a.is_finite() && b.is_finite() && o.value.is_infinite() && !o.status.contains(Status::DIV_BY_ZERO) {
+                            o.status |= Status::OVERFLOW;
                         }
                         env.account_float_divide(T::get_word_count());
                     }),
@@ -752,11 +762,11 @@ impl<F: FloatBits> Cpu<F> {
                                 // single
                                 let a = F::unbox_single(a);
                                 let result = if env.use_accurate_single_sqrt(){
-                                    let (result, iterations) = ieee_apsqrt::sqrt_fast(a, round_mode!());
+                                    let (result, iterations) = ieee_apsqrt::sqrt_accurate(a, round_mode!());
                                     env.account_sqrt(1, iterations);
                                     result
                                 } else {
-                                    let (result, iterations) = ieee_apsqrt::sqrt_accurate(a, round_mode!());
+                                    let (result, iterations) = ieee_apsqrt::sqrt_fast(a, round_mode!());
                                     env.account_sqrt(2, iterations);
                                     result
                                 };
@@ -766,11 +776,11 @@ impl<F: FloatBits> Cpu<F> {
                                 // double
                                 let a = F::unbox_double(a);
                                 let result = if env.use_accurate_single_sqrt(){
-                                    let (result, iterations) = ieee_apsqrt::sqrt_fast(a, round_mode!());
+                                    let (result, iterations) = ieee_apsqrt::sqrt_accurate(a, round_mode!());
                                     env.account_sqrt(2, iterations);
                                     result
                                 } else {
-                                    let (result, iterations) = ieee_apsqrt::sqrt_accurate(a, round_mode!());
+                                    let (result, iterations) = ieee_apsqrt::sqrt_fast(a, round_mode!());
                                     env.account_sqrt(4, iterations);
                                     result
                                 };
@@ -780,11 +790,11 @@ impl<F: FloatBits> Cpu<F> {
                                 // quad
                                 let a = F::unbox_quad(a);
                                 let result = if env.use_accurate_single_sqrt(){
+                                    return Err((ExceptionCause::IllegalInstruction, instruction))
+                                } else {
                                     let (result, iterations) = ieee_apsqrt::sqrt_fast(a, round_mode!());
                                     env.account_sqrt(4, iterations);
                                     result
-                                } else {
-                                    return Err((ExceptionCause::IllegalInstruction, instruction))
                                 };
                                 F::box_quad(float::maybe_unstatus(self, result))
                             },
@@ -840,11 +850,35 @@ impl<F: FloatBits> Cpu<F> {
                     0b00101 => { // FMIN/FMAX
                         match funct3!() {
                             0b000 => float_op!(T; o = a, b; {
-                                o = a.min(b);
+                                if a.is_nan() {
+                                    o = b;
+                                } else if b.is_nan() {
+                                    o = a;
+                                } else if a.is_zero() && b.is_zero() {
+                                    if a.is_negative() { o = a }
+                                    else { o = b }
+                                } else {
+                                    o = a.min(b);
+                                }
+                                if a.is_signaling() || b.is_signaling() {
+                                    self.accrue_float_exceptions(INVALID_FLAG);
+                                }
                                 env.account_float_binop(T::get_word_count());
                             }),
                             0b001 => float_op!(T; o = a, b; {
-                                o = a.max(b);
+                                if a.is_nan() {
+                                    o = b;
+                                } else if b.is_nan() {
+                                    o = a;
+                                } else if a.is_zero() && b.is_zero() {
+                                    if b.is_negative() { o = a }
+                                    else { o = b }
+                                } else {
+                                    o = a.max(b);
+                                }
+                                if a.is_signaling() || b.is_signaling() {
+                                    self.accrue_float_exceptions(INVALID_FLAG);
+                                }
                                 env.account_float_binop(T::get_word_count());
                             }),
                             _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
@@ -855,27 +889,27 @@ impl<F: FloatBits> Cpu<F> {
                             // source size -> destination size
                             (0b01, 0b00) if F::SUPPORT_D => {
                                 // FCVT.D.S
-                                fcvt!(Double -> Single);
+                                fcvt!(Single -> Double);
                             },
                             (0b00, 0b01) if F::SUPPORT_D => {
                                 // FCVT.S.D
-                                fcvt!(Single -> Double);
+                                fcvt!(Double -> Single);
                             },
                             (0b11, 0b00) if F::SUPPORT_Q => {
                                 // FCVT.Q.S
-                                fcvt!(Quad -> Single);
+                                fcvt!(Single -> Quad);
                             },
                             (0b00, 0b11) if F::SUPPORT_Q => {
                                 // FCVT.S.Q
-                                fcvt!(Single -> Quad);
+                                fcvt!(Quad -> Single);
                             },
                             (0b11, 0b01) if F::SUPPORT_Q => {
                                 // FCVT.Q.D
-                                fcvt!(Quad -> Double);
+                                fcvt!(Double -> Quad);
                             },
                             (0b01, 0b11) if F::SUPPORT_Q => {
                                 // FCVT.D.Q
-                                fcvt!(Double -> Quad);
+                                fcvt!(Quad -> Double);
                             },
                             _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
                         }
@@ -884,31 +918,85 @@ impl<F: FloatBits> Cpu<F> {
                         match funct3!() {
                             0b000 => float_op!(T; = a, b; {
                                 self.put_register(rd!(), (a <= b) as u32);
+                                if a.is_nan() || b.is_nan() {
+                                    self.accrue_float_exceptions(INVALID_FLAG);
+                                }
                                 env.account_generic_op();
                             }),
                             0b001 => float_op!(T; = a, b; {
                                 self.put_register(rd!(), (a < b) as u32);
+                                if a.is_nan() || b.is_nan() {
+                                    self.accrue_float_exceptions(INVALID_FLAG);
+                                }
                                 env.account_generic_op();
                             }),
                             0b010 => float_op!(T; = a, b; {
                                 self.put_register(rd!(), (a == b) as u32);
+                                if a.is_signaling() || b.is_signaling() {
+                                    self.accrue_float_exceptions(INVALID_FLAG);
+                                }
                                 env.account_generic_op();
                             }),
                             _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
                         }
-                    }
+                    },
                     0b11000 => {
                         match rs2!() {
                             0b00000 => {
                                 // FCVT.W.{S,D,Q}
+                                let dst;
+                                float_op!(T; = a; {
+                                    let mut exact = false;
+                                    if a.is_nan() {
+                                        dst = i128::MAX;
+                                        self.accrue_float_exceptions(INVALID_FLAG);
+                                    } else {
+                                        dst = float::maybe_unstatus(self, a.to_i128_r(32, round_mode!(), &mut exact));
+                                    }
+                                    env.account_fcvt_to_int(T::get_word_count());
+                                });
+                                if dst > i32::MAX as i128 {
+                                    self.put_register(rd!(), i32::MAX as u32);
+                                } else if dst < i32::MIN as i128 {
+                                    self.put_register(rd!(), i32::MIN as u32);
+                                } else {
+                                    self.put_register(rd!(), dst as u32);
+                                }
+                            },
+                            0b00001 => {
+                                // FCVT.WU.{S,D,Q}
+                                let dst;
+                                float_op!(T; = a; {
+                                    let mut exact = false;
+                                    if a.is_nan() {
+                                        dst = u128::MAX;
+                                        self.accrue_float_exceptions(INVALID_FLAG);
+                                    } else {
+                                        dst = float::maybe_unstatus(self, a.to_u128_r(32, round_mode!(), &mut exact));
+                                    }
+                                    env.account_fcvt_to_int(T::get_word_count());
+                                });
+                                if dst > u32::MAX as u128 {
+                                    self.put_register(rd!(), u32::MAX as u32);
+                                } else {
+                                    self.put_register(rd!(), dst as u32);
+                                }
+                            },
+                            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                        }
+                    },
+                    0b11010 => {
+                        match rs2!() {
+                            0b00000 => {
+                                // FCVT.{S,D,Q}.W
                                 let src = self.get_register(rs1!());
                                 float_op!(T; o =; {
-                                    o = T::from_i128_r(src as i128, round_mode!());
+                                    o = T::from_i128_r(src as i32 as i128, round_mode!());
                                     env.account_fcvt_from_int(T::get_word_count());
                                 });
                             },
                             0b00001 => {
-                                // FCVT.WU.{S,D,Q}
+                                // FCVT.{S,D,Q}.WU
                                 let src = self.get_register(rs1!());
                                 float_op!(T; o =; {
                                     o = T::from_u128_r(src as u128, round_mode!());
@@ -918,39 +1006,14 @@ impl<F: FloatBits> Cpu<F> {
                             _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
                         }
                     },
-                    0b11010 => {
-                        match rs2!() {
-                            0b00000 => {
-                                // FCVT.{S,D,Q}.W
-                                let dst;
-                                float_op!(T; = a; {
-                                    let mut exact = false;
-                                    dst = float::maybe_unstatus(self, a.to_i128_r(32, round_mode!(), &mut exact));
-                                    env.account_fcvt_to_int(T::get_word_count());
-                                });
-                                self.put_register(rd!(), dst as u32);
-                            },
-                            0b00001 => {
-                                // FCVT.{S,D,Q}.WU
-                                let dst;
-                                float_op!(T; = a; {
-                                    let mut exact = false;
-                                    dst = float::maybe_unstatus(self, a.to_u128_r(32, round_mode!(), &mut exact));
-                                    env.account_fcvt_to_int(T::get_word_count());
-                                });
-                                self.put_register(rd!(), dst as u32);
-                            },
-                            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
-                        }
-                    },
                     0b11100 => match (rs2!(), funct3!()) {
-                        (0b00000, 0b000) if rs2!() == 0 => {
+                        (0b00000, 0b000) => {
                             // FMV.X.W
                             let a = F::unbox_single(self.float_registers[rs1!() as usize]);
                             self.put_register(rd!(), a);
                             env.account_generic_op();
                         },
-                        (0b00000, 0b000) if rs2!() == 0 => {
+                        (0b00000, 0b001) => {
                             // FCLASS.{S,D,Q}
                             float_op!(T; = a; {
                                 let mut o = 0;
@@ -976,7 +1039,7 @@ impl<F: FloatBits> Cpu<F> {
                         _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
                     },
                     0b11110 => match (rs2!(), funct3!()) {
-                        (0b00000, 0b000) if rs2!() == 0 => {
+                        (0b00000, 0b000) => {
                             // FMV.W.X
                             let a = self.get_register(rs1!());
                             self.float_registers[rd!() as usize] = F::box_single(a);
@@ -1122,7 +1185,7 @@ impl<F: FloatBits> Cpu<F> {
     }
     /// Note that some floating point exceptions have occurred.
     #[allow(unused)]
-    fn float_exceptions(&mut self, exceptions: u32) {
+    fn accrue_float_exceptions(&mut self, exceptions: u32) {
         let fcsr = F::read_csr(&self.fcsr);
         let fcsr = fcsr | (exceptions & 0b11111);
         F::write_csr(&mut self.fcsr, fcsr);
@@ -1147,7 +1210,7 @@ impl<F: FloatBits> Cpu<F> {
         let old_value = F::read_csr(&self.fcsr);
         let new_value = (handler(self, old_value) & 0b11111) | (old_value & !0b11111);
         F::write_csr(&mut self.fcsr, new_value);
-        Ok(old_value)
+        Ok(old_value & 0b11111)
     }
     /// Access the `frm` CSR. If you are not using floating point, will
     /// just raise an illegal instruction exception.
@@ -1165,7 +1228,7 @@ impl<F: FloatBits> Cpu<F> {
         let old_value = F::read_csr(&self.fcsr);
         let new_value = (handler(self, old_value) & 0b111_11111) | (old_value & !0b111_11111);
         F::write_csr(&mut self.fcsr, new_value);
-        Ok(old_value & 0b11111)
+        Ok(old_value & 0b111_11111)
     }
 }
 

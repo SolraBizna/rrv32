@@ -16,9 +16,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "ieee-apsqrt"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a37b28e2c2df8d42b16e007542a035a0d47ed387cd15bc79d2ee2457ef1103a"
+checksum = "4328941c554aaeea28ca420cd1f10e932fa38874faf8c75e3ed184c64c5c6cec"
 dependencies = [
  "rustc_apfloat",
 ]
