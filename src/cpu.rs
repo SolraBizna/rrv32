@@ -374,7 +374,7 @@ impl<F: FloatBits> Cpu<F> {
             ($T:ident; $($o:ident),* = $($i:ident),*; $code:block) => {{
                 #[allow(unused)] use float::Float;
                 match fprecision!() {
-                    0b00 if F::SUPPORT_F => {
+                    0b00 if F::SUPPORT_F && env.enable_f() => {
                         #[allow(unused)] type $T = float::Single;
                         float_inputs_single!($($i),*);
                         $(#[allow(unused_mut)] let mut $o;),*
@@ -388,7 +388,7 @@ impl<F: FloatBits> Cpu<F> {
                             }
                         ),*
                     }
-                    0b01 if F::SUPPORT_D => {
+                    0b01 if F::SUPPORT_D && env.enable_d() => {
                         #[allow(unused)] type $T = float::Double;
                         float_inputs_double!($($i),*);
                         $(#[allow(unused_mut)] let mut $o;),*
@@ -402,7 +402,7 @@ impl<F: FloatBits> Cpu<F> {
                             }
                         ),*
                     }
-                    0b11 if F::SUPPORT_Q => {
+                    0b11 if F::SUPPORT_Q && env.enable_q() => {
                         #[allow(unused)] type $T = float::Quad;
                         float_inputs_quad!($($i),*);
                         $(#[allow(unused_mut)] let mut $o;),*
@@ -487,7 +487,7 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_memory_load(address);
             }
             #[cfg(feature="float")]
-            0b00001 if F::SUPPORT_F && funct3!() == 0b010 => {
+            0b00001 if F::SUPPORT_F && env.enable_f() && funct3!() == 0b010 => {
                 // FLW
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12!());
@@ -496,7 +496,7 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_memory_load(address);
             }
             #[cfg(feature="float")]
-            0b00001 if F::SUPPORT_D && funct3!() == 0b011 => {
+            0b00001 if F::SUPPORT_D && env.enable_d() && funct3!() == 0b011 => {
                 // FLD
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12!());
@@ -508,7 +508,7 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_memory_double_load(address);
             }
             #[cfg(feature="float")]
-            0b00001 if F::SUPPORT_Q && funct3!() == 0b100 => {
+            0b00001 if F::SUPPORT_Q && env.enable_q() && funct3!() == 0b100 => {
                 // FLQ?
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12!());
@@ -572,7 +572,7 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_memory_store(address);
             }
             #[cfg(feature="float")]
-            0b01001 if F::SUPPORT_F && funct3!() == 0b010 => {
+            0b01001 if F::SUPPORT_F && env.enable_f() && funct3!() == 0b010 => {
                 // FSW
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12s!());
@@ -581,7 +581,7 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_memory_store(address);
             }
             #[cfg(feature="float")]
-            0b01001 if F::SUPPORT_D && funct3!() == 0b011 => {
+            0b01001 if F::SUPPORT_D && env.enable_d() && funct3!() == 0b011 => {
                 // FSD
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12s!());
@@ -592,7 +592,7 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_memory_double_store(address);
             }
             #[cfg(feature="float")]
-            0b01001 if F::SUPPORT_Q && funct3!() == 0b100 => {
+            0b01001 if F::SUPPORT_Q && env.enable_q() && funct3!() == 0b100 => {
                 // FSQ?
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12s!());
@@ -603,7 +603,7 @@ impl<F: FloatBits> Cpu<F> {
                 map_store(address, env.write_word(address.wrapping_add(12), (words >> 96) as u32, !0))?;
                 env.account_memory_double_store(address);
             }
-            0b01011 if Env::SUPPORT_A && funct3!() == 0b010 => {
+            0b01011 if Env::SUPPORT_A && env.enable_a() && funct3!() == 0b010 => {
                 // (AMO)
                 let amop = instruction >> 27;
                 let aq = instruction & (1<<26) != 0;
@@ -626,7 +626,7 @@ impl<F: FloatBits> Cpu<F> {
                         env.account_alu_op();
                         x
                     },
-                    0b0000001 if Env::SUPPORT_M => match funct3!() {
+                    0b0000001 if Env::SUPPORT_M && env.enable_m() => match funct3!() {
                         0b000 => {
                             // MUL
                             env.account_mul_op();
@@ -887,27 +887,27 @@ impl<F: FloatBits> Cpu<F> {
                     0b01000 => {
                         match (fprecision!(), rs2!()) {
                             // source size -> destination size
-                            (0b01, 0b00) if F::SUPPORT_D => {
+                            (0b01, 0b00) if F::SUPPORT_D && env.enable_d() => {
                                 // FCVT.D.S
                                 fcvt!(Single -> Double);
                             },
-                            (0b00, 0b01) if F::SUPPORT_D => {
+                            (0b00, 0b01) if F::SUPPORT_D && env.enable_d() => {
                                 // FCVT.S.D
                                 fcvt!(Double -> Single);
                             },
-                            (0b11, 0b00) if F::SUPPORT_Q => {
+                            (0b11, 0b00) if F::SUPPORT_Q && env.enable_q() => {
                                 // FCVT.Q.S
                                 fcvt!(Single -> Quad);
                             },
-                            (0b00, 0b11) if F::SUPPORT_Q => {
+                            (0b00, 0b11) if F::SUPPORT_Q && env.enable_q() => {
                                 // FCVT.S.Q
                                 fcvt!(Quad -> Single);
                             },
-                            (0b11, 0b01) if F::SUPPORT_Q => {
+                            (0b11, 0b01) if F::SUPPORT_Q && env.enable_q() => {
                                 // FCVT.Q.D
                                 fcvt!(Double -> Quad);
                             },
-                            (0b01, 0b11) if F::SUPPORT_Q => {
+                            (0b01, 0b11) if F::SUPPORT_Q && env.enable_q() => {
                                 // FCVT.D.Q
                                 fcvt!(Quad -> Double);
                             },
@@ -1102,7 +1102,7 @@ impl<F: FloatBits> Cpu<F> {
                             return Err((ExceptionCause::IllegalInstruction,0))
                         }
                     }
-                } else {
+                } else if env.enable_zicsr() {
                     let (handler, source_value): (fn(u32,u32)->u32, u32) = match funct3!() {
                         // CSRRW
                         0b001 => (|_old_value, new_value| { new_value }, self.get_register(rs1!())),
@@ -1122,6 +1122,8 @@ impl<F: FloatBits> Cpu<F> {
                     };
                     let result = env.csr_access(self, csr!(), handler, source_value).map_err(|x| (x, instruction))?;
                     self.put_register(rd!(), result);
+                } else {
+                    return Err((ExceptionCause::IllegalInstruction,0))
                 }
             }
             _ => {
@@ -1178,6 +1180,8 @@ impl<F: FloatBits> Cpu<F> {
     /// Access the `fcsr` CSR. If you are not using floating point, will
     /// just raise an illegal instruction exception.
     pub fn access_fcsr(&mut self, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32,ExceptionCause> {
+        // TODO: we can currently access the CSR if the CPU supports F, even if
+        // the extension is disabled in the environment. Is that OK?
         if !F::SUPPORT_F { return Err(ExceptionCause::IllegalInstruction) }
         let old_value = F::read_csr(&self.fcsr);
         let new_value = (handler(old_value, operand) & 0b111_11111) | (old_value & !0b111_11111);

@@ -30,9 +30,6 @@ pub trait ExecutionEnvironment {
     /// Return true if the Q extension should be enabled (only called if
     /// supported).
     fn enable_q(&self) -> bool { true }
-    /// Return true if the Zhf extension should be enabled (only called if
-    /// supported).
-    fn enable_zhf(&self) -> bool { true }
     /// Return true if the Zicsr extension should be enabled.
     fn enable_zicsr(&self) -> bool { true }
     /// Return true if the Zifence extension should be enabled.
