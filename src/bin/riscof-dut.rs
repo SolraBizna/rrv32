@@ -257,10 +257,12 @@ fn load_elf(path: &str) -> LoadedElf {
         f.seek(SeekFrom::Start(program_header.p_offset as u64)).unwrap();
         assert_eq!(program_header.p_vaddr % 4, 0, "Section not aligned to a 4-byte boundary.");
         //assert_eq!(program_header.p_filesz % 4, 0, "File size not a multiple of 4.");
+        //assert_eq!(program_header.p_memsz % 4, 0, "Memory size not a multiple of 4.");
+        // Being lazy! Round file and memory size up to a multiple of 4. It
+        // only needs to be good enough to work in the tests...
         let disk_size = if program_header.p_filesz % 4 == 0 { program_header.p_filesz }
         else { (program_header.p_filesz & !3) + 4 } as usize;
-        //assert_eq!(program_header.p_memsz % 4, 0, "Memory size not a multiple of 4.");
-        let mem_size = if program_header.p_memsz % 4 == 0 { program_header.p_memsz }
+        let _mem_size = if program_header.p_memsz % 4 == 0 { program_header.p_memsz }
         else { (program_header.p_memsz & !3) + 4 } as usize;
         let mut words = vec![];
         words.reserve_exact(program_header.p_memsz as usize);
