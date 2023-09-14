@@ -240,7 +240,7 @@ impl<F: FloatBits> Cpu<F> {
     /// Error result is `(mcause, mtval)`.
     fn internal_step<Env: ExecutionEnvironment>(&mut self, env: &mut Env) -> Result<(), (ExceptionCause, u32)> {
         let this_pc = self.get_pc();
-        let orig_instruction = map_ifetch(this_pc, env.read_word(this_pc, !0))?;
+        let orig_instruction = map_ifetch(this_pc, env.read_instruction(this_pc))?;
         env.account_ifetch(this_pc);
         #[cfg(feature="C")]
         let (orig_instruction, instruction, mut next_pc) = if orig_instruction & 0b11 != 0b11 {

@@ -342,9 +342,6 @@ impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment for Elfo<
     const SUPPORT_M: bool = M;
     const SUPPORT_C: bool = C;
     fn read_word(&mut self, address: u32, _mask: u32) -> Result<u32, rrv32::MemoryAccessFailure> {
-        if Self::SUPPORT_C && self.enable_c() && address % 4 == 2 {
-            return Ok(self.read_half(address)? as u32 | ((self.read_half(address+2)? as u32) << 16));
-        }
         if address % 4 != 0 { return Err(MemoryAccessFailure::Unaligned) }
         if address == 0xC0000000 { todo!("fromhost") }
         else if address >= 0x80000000 {

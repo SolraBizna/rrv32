@@ -13,10 +13,8 @@ pub enum MemoryAccessFailure {
 pub trait ExecutionEnvironment {
     /// Set to true (default) if the A extension should be supported.
     const SUPPORT_A: bool = true;
-    /// Set to true (default) if the C extension should be supported. C support
-    /// is DISABLED by default, because our implementation of C requires that
-    /// unaligned word reads be supported.
-    const SUPPORT_C: bool = false;
+    /// Set to true (default) if the C extension should be supported.
+    const SUPPORT_C: bool = true;
     /// Set to true (default) if the M extension should be supported.
     const SUPPORT_M: bool = true;
     /// Return true if the A extension should be enabled (only called if
@@ -46,12 +44,40 @@ pub trait ExecutionEnvironment {
     /// byte boundary, **OR** determine and implement unaligned memory access
     /// logic yourself. (See section 2.6 "Load and Store Instructions" of the
     /// RISC-V spec.)
-    ///
-    /// **NOTE:** In order to support the C extension, your `read_word` must be
-    /// able to read a word from a two-byte-aligned address. You may, if you
-    /// like, still throw an `Err(Unaligned)` if mask is not all-ones in this
-    /// case.
     fn read_word(&mut self, address: u32, mask: u32) -> Result<u32, MemoryAccessFailure>;
+    /// Read one instruction word from memory. If C is enabled, this word might
+    /// only be 2-byte aligned. The default implementation calls `read_half`
+    /// once or twice for half-aligned instruction fetches. You might be able
+    /// to improve on that with a custom implementation, depending on your
+    /// memory model. (In particular, if you implement arbitrarily misaligned
+    /// word reads, this should just call `read_word` unconditionally.)
+    ///
+    /// You MAY return `Err(Unaligned)` on unaligned instruction reads, but
+    /// `rrv32` should make it impossible to have such a thing. The only ways
+    /// to end up in that state:
+    ///
+    /// - Call `cpu.put_pc` with a half-aligned address while C is disabled.
+    /// - Forget the part of the spec that says that disabling C is a no-op if
+    ///   the next instruction would be half-aligned.
+    ///
+    /// And `rrv32` prevents the low bit of the PC from being set under any
+    /// circumstances, so you will never get an address that is merely
+    /// byte-aligned.
+    fn read_instruction(&mut self, address: u32) -> Result<u32, MemoryAccessFailure> {
+        debug_assert!(address % 2 == 0);
+        if address & 2 == 0 {
+            // Full word aligned.
+            self.read_word(address, !0)
+        } else {
+            // Half-word aligned.
+            let low_bits = self.read_half(address)?;
+            if low_bits & 0b11 == 0b11 {
+                // 32-bit (or greater) instruction, fetch the upper half.
+                let high_bits = self.read_half(address+2)?;
+                Ok(low_bits as u32 | ((high_bits as u32) << 16))
+            } else { Ok(low_bits as u32) }
+        }
+    }
     /// Read a halfword from memory. Return `Err(Unaligned)` if address is not
     /// aligned to a four-byte boundary, **OR** determine and implement
     /// unaligned memory access logic yourself.
