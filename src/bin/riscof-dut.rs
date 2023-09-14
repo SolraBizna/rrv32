@@ -314,7 +314,7 @@ fn load_elf(path: &str) -> LoadedElf {
     LoadedElf { sections: chunks, entry_point: header.e_entry, symbol_table }
 }
 
-struct Elfo<const A: bool, const M: bool> {
+struct Elfo<const A: bool, const M: bool, const C: bool> {
     ram: Vec<u32>,
     entry_point: u32,
     reserved_addr: u32,
@@ -322,8 +322,8 @@ struct Elfo<const A: bool, const M: bool> {
     symbol_table: HashMap<Vec<u8>, u32>,
 }
 
-impl<const A: bool, const M: bool> Elfo<A, M> {
-    fn new(elf: LoadedElf) -> Elfo<A, M> {
+impl<const A: bool, const M: bool, const C: bool> Elfo<A, M, C> {
+    fn new(elf: LoadedElf) -> Elfo<A, M, C> {
         let mut ram = vec![0u32; 0x400000];
         for section in elf.sections.iter() {
             let start = ((section.base - 0x80000000) / 4) as usize;
@@ -337,10 +337,14 @@ impl<const A: bool, const M: bool> Elfo<A, M> {
     }
 }
 
-impl<const A: bool, const M: bool> ExecutionEnvironment for Elfo<A,M> {
+impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment for Elfo<A,M,C> {
     const SUPPORT_A: bool = A;
     const SUPPORT_M: bool = M;
+    const SUPPORT_C: bool = C;
     fn read_word(&mut self, address: u32, _mask: u32) -> Result<u32, rrv32::MemoryAccessFailure> {
+        if Self::SUPPORT_C && self.enable_c() && address % 4 == 2 {
+            return Ok(self.read_half(address)? as u32 | ((self.read_half(address+2)? as u32) << 16));
+        }
         if address % 4 != 0 { return Err(MemoryAccessFailure::Unaligned) }
         if address == 0xC0000000 { todo!("fromhost") }
         else if address >= 0x80000000 {
@@ -380,7 +384,7 @@ impl<const A: bool, const M: bool> ExecutionEnvironment for Elfo<A,M> {
         self.write_word(address, data, !0).map(|_| true)
     }
     fn csr_access<F:FloatBits>(&mut self, cpu: &mut Cpu<F>, csr_number: u32, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32, ExceptionCause> {
-        if F::SUPPORT_F {
+        if F::SUPPORT_F && self.enable_f() {
             match csr_number {
                 0x001 => return cpu.access_fflags(handler, operand),
                 0x002 => return cpu.access_frm(handler, operand),
@@ -399,7 +403,7 @@ impl<const A: bool, const M: bool> ExecutionEnvironment for Elfo<A,M> {
     }
 }
 
-fn run_inner<F: FloatBits, const A: bool, const M: bool>(signature_path: &str, mut elfo: Elfo<A,M>) {
+fn run_inner<F: FloatBits, const A: bool, const M: bool, const C: bool>(signature_path: &str, mut elfo: Elfo<A,M,C>) {
     let mut cpu = rrv32::Cpu::<F>::new();
     cpu.put_pc(elfo.entry_point);
     loop {
@@ -417,7 +421,7 @@ fn run_inner<F: FloatBits, const A: bool, const M: bool>(signature_path: &str, m
                 }
             },
             None => (),
-            Some(tohost) => eprintln!("Unknown tohost value: {tohost}/0x{tohost:X}"),
+            Some(tohost) => panic!("Unknown tohost value: {tohost}/0x{tohost:X}"),
         }
     }
     let sig_begin = *elfo.symbol_table.get(b"rvtest_sig_begin" as &[u8]).expect("missing rvtest_sig_begin symbol");
@@ -431,12 +435,16 @@ fn run_inner<F: FloatBits, const A: bool, const M: bool>(signature_path: &str, m
     }
 }
 
-fn run_outer<F: FloatBits>(signature_path: &str, support_a: bool, support_m: bool, elf: LoadedElf) {
-    match (support_a, support_m) {
-        (false, false) => run_inner::<F, false, false>(signature_path, Elfo::new(elf)),
-        (true, false) => run_inner::<F, true, false>(signature_path, Elfo::new(elf)),
-        (false, true) => run_inner::<F, false, true>(signature_path, Elfo::new(elf)),
-        (true, true) => run_inner::<F, true, true>(signature_path, Elfo::new(elf)),
+fn run_outer<F: FloatBits>(signature_path: &str, support_a: bool, support_m: bool, support_c: bool, elf: LoadedElf) {
+    match (support_a, support_m, support_c) {
+        (false, false, false) => run_inner::<F, false, false, false>(signature_path, Elfo::new(elf)),
+        (true, false, false) => run_inner::<F, true, false, false>(signature_path, Elfo::new(elf)),
+        (false, true, false) => run_inner::<F, false, true, false>(signature_path, Elfo::new(elf)),
+        (true, true, false) => run_inner::<F, true, true, false>(signature_path, Elfo::new(elf)),
+        (false, false, true) => run_inner::<F, false, false, true>(signature_path, Elfo::new(elf)),
+        (true, false, true) => run_inner::<F, true, false, true>(signature_path, Elfo::new(elf)),
+        (false, true, true) => run_inner::<F, false, true, true>(signature_path, Elfo::new(elf)),
+        (true, true, true) => run_inner::<F, true, true, true>(signature_path, Elfo::new(elf)),
     }
 }
 
@@ -451,7 +459,7 @@ fn main() {
         } else { None },
         |isa| {
             for el in isa[4..].chars() {
-                if !"imafdq".contains(el) {
+                if !"imafdqc".contains(el) {
                     return Some(format!("Unknown ISA extension {el:?}"))
                 }
             }
@@ -475,14 +483,14 @@ fn main() {
         else if isa[4..].contains("d") { FloatISA::D }
         else if isa[4..].contains("f") { FloatISA::F }
         else { FloatISA::None };
-    dbg!(&float_isa);
     let support_a = isa[4..].contains("a");
     let support_m = isa[4..].contains("m");
+    let support_c = isa[4..].contains("c");
     let elf = load_elf(&exe_path);
     match float_isa {
-        FloatISA::None => run_outer::<()>(&signature_path, support_a, support_m, elf),
-        FloatISA::F => run_outer::<u32>(&signature_path, support_a, support_m, elf),
-        FloatISA::D => run_outer::<u64>(&signature_path, support_a, support_m, elf),
-        FloatISA::Q => run_outer::<u128>(&signature_path, support_a, support_m, elf),
+        FloatISA::None => run_outer::<()>(&signature_path, support_a, support_m, support_c, elf),
+        FloatISA::F => run_outer::<u32>(&signature_path, support_a, support_m, support_c, elf),
+        FloatISA::D => run_outer::<u64>(&signature_path, support_a, support_m, support_c, elf),
+        FloatISA::Q => run_outer::<u128>(&signature_path, support_a, support_m, support_c, elf),
     }
 }

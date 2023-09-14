@@ -12,5 +12,6 @@ rustc_apfloat = {version = "0.2.0", optional = true}
 ieee-apsqrt = "0.1.1"
 
 [features]
-default = ["float"]
+default = ["float", "C"]
 float = ["rustc_apfloat"]
+C = []

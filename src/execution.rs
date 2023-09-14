@@ -11,13 +11,20 @@ pub enum MemoryAccessFailure {
 }
 
 pub trait ExecutionEnvironment {
-    /// Set to true (default) if the M extension should be supported.
-    const SUPPORT_M: bool = true;
     /// Set to true (default) if the A extension should be supported.
     const SUPPORT_A: bool = true;
+    /// Set to true (default) if the C extension should be supported. C support
+    /// is DISABLED by default, because our implementation of C requires that
+    /// unaligned word reads be supported.
+    const SUPPORT_C: bool = false;
+    /// Set to true (default) if the M extension should be supported.
+    const SUPPORT_M: bool = true;
     /// Return true if the A extension should be enabled (only called if
     /// supported).
     fn enable_a(&self) -> bool { true }
+    /// Return true if the C extension should be enabled (only called if
+    /// supported).
+    fn enable_c(&self) -> bool { true }
     /// Return true if the M extension should be enabled (only called if
     /// supported).
     fn enable_m(&self) -> bool { true }
@@ -39,6 +46,11 @@ pub trait ExecutionEnvironment {
     /// byte boundary, **OR** determine and implement unaligned memory access
     /// logic yourself. (See section 2.6 "Load and Store Instructions" of the
     /// RISC-V spec.)
+    ///
+    /// **NOTE:** In order to support the C extension, your `read_word` must be
+    /// able to read a word from a two-byte-aligned address. You may, if you
+    /// like, still throw an `Err(Unaligned)` if mask is not all-ones in this
+    /// case.
     fn read_word(&mut self, address: u32, mask: u32) -> Result<u32, MemoryAccessFailure>;
     /// Read a halfword from memory. Return `Err(Unaligned)` if address is not
     /// aligned to a four-byte boundary, **OR** determine and implement
@@ -116,7 +128,7 @@ pub trait ExecutionEnvironment {
     /// well as the timing flags shown in table 24.3 "RISC-V control and status
     /// register (CSR) address map" of the RISC-V standard.
     fn csr_access<F: FloatBits>(&mut self, cpu: &mut Cpu<F>, csr_number: u32, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32, ExceptionCause> {
-        if F::SUPPORT_F {
+        if F::SUPPORT_F && self.enable_f() {
             match csr_number {
                 0x001 => return cpu.access_fflags(handler, operand),
                 0x002 => return cpu.access_frm(handler, operand),

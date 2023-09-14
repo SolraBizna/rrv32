@@ -170,7 +170,7 @@ impl<F: FloatBits> Cpu<F> {
             panic!("register {index} out of range")
         }
     }
-    fn perform_amo<Env: ExecutionEnvironment>(&mut self, env: &mut Env, amop: u32, rd: u32, rs1: u32, rs2: u32, _aq: bool, _rl: bool, instruction: u32) -> Result<(),(ExceptionCause,u32)> {
+    fn perform_amo<Env: ExecutionEnvironment>(&mut self, env: &mut Env, amop: u32, rd: u32, rs1: u32, rs2: u32, _aq: bool, _rl: bool, orig_instruction: u32) -> Result<(),(ExceptionCause,u32)> {
         let addr = self.get_register(rs1);
         // |mem, reg| -> mem
         let amop: fn(u32, u32) -> u32 = match amop {
@@ -226,7 +226,7 @@ impl<F: FloatBits> Cpu<F> {
                 // AMOMAXU.W
                 mem.max(reg)
             },
-            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+            _ => return Err((ExceptionCause::IllegalInstruction, orig_instruction))
         };
         let src = self.get_register(rs2);
         // yes, map_store, because AMOs produce store exceptions even if it is
@@ -240,17 +240,298 @@ impl<F: FloatBits> Cpu<F> {
     /// Error result is `(mcause, mtval)`.
     fn internal_step<Env: ExecutionEnvironment>(&mut self, env: &mut Env) -> Result<(), (ExceptionCause, u32)> {
         let this_pc = self.get_pc();
-        let instruction = map_ifetch(this_pc, env.read_word(this_pc, !0))?;
-        if instruction & 0b11 != 0b11 {
-            return Err((ExceptionCause::IllegalInstruction,0))
-        }
+        let orig_instruction = map_ifetch(this_pc, env.read_word(this_pc, !0))?;
         env.account_ifetch(this_pc);
-        let mut next_pc = this_pc.wrapping_add(4);
+        #[cfg(feature="C")]
+        let (orig_instruction, instruction, mut next_pc) = if orig_instruction & 0b11 != 0b11 {
+            // It's a 16-bit instruction!
+            if !Env::SUPPORT_C || !env.enable_c() {
+                return Err((ExceptionCause::IllegalInstruction, orig_instruction))
+            }
+            // Decode it
+            // (see below comment about lexically scoped macros)
+            let orig_instruction = orig_instruction & 0xFFFF;
+            macro_rules! illegal {
+                () => { return Err((ExceptionCause::IllegalInstruction, orig_instruction)) };
+            }
+            macro_rules! extracted {
+                (($hi:literal .. $lo:literal)) => {
+                    { (orig_instruction >> $lo) & ((1<<($hi+1-$lo))-1) }
+                };
+                ((~$hi:literal .. $lo:literal)) => {
+                    ((orig_instruction >> $lo) & ((1<<($hi-$lo))-1)) | (if (orig_instruction >> $hi) & 1 != 0 { !0 << ($hi-$lo) } else { 0 })
+                };
+                ($x:expr) => { $x };
+            }
+            macro_rules! extract {
+                ($($x:tt),+) => {
+                    ($(extracted!($x)),+)
+                };
+            }
+            macro_rules! inserted {
+                ($input:expr => $outbit:literal) => {
+                    { $input << $outbit }
+                };
+                ($input:expr => ($hi:literal $lo:literal)) => {
+                    (($input) & (((1<<($hi+1-$lo))-1)) << $outbit)
+                };
+            }
+            macro_rules! assemble {
+                ($start:literal, $($input:tt->$output:tt),+) => {
+                    { $start $( | inserted!(extracted!($input) => $output))+ }
+                };
+            }
+            let decoded_instruction: u32 = match extract!((15..13), (1..0)) {
+                (0b000, 0b00) => { // ADDI4SPN
+                    let offset = assemble!(0, (12..11)->4, (10..7)->6, (6..6)->2, (5..5)->3);
+                    if offset == 0 { illegal!() }
+                    let rd = extract!((4..2))+8;
+                    self.put_register(rd, self.get_register(2).wrapping_add(offset));
+                    env.account_generic_op();
+                    self.put_pc(this_pc.wrapping_add(2));
+                    return Ok(())
+                },
+                (0b001, 0b00) => { // FLD
+                    let offset = assemble!(0, (12..10)->3, (6..5)->6);
+                    let (rs1, rd) = extract!((9..7), (4..2));
+                    assemble!(0b011_00000_0000111, (rs1+8)->15, (rd+8)->7, offset->20)
+                },
+                (0b010, 0b00) => { // LW
+                    let offset = assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
+                    let (rs1, rd) = extract!((9..7), (4..2));
+                    assemble!(0b010_00000_0000011, (rs1+8)->15, (rd+8)->7, offset->20)
+                },
+                (0b011, 0b00) => { // FLW
+                    let offset = assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
+                    let (rs1, rd) = extract!((9..7), (4..2));
+                    assemble!(0b010_00000_0000111, (rs1+8)->15, (rd+8)->7, offset->20)
+                },
+                (0b101, 0b00) => { // FSD
+                    let offset = assemble!(0, (12..10)->3, (6..5)->6);
+                    let (rs1, rs2) = extract!((9..7), (4..2));
+                    assemble!(0b010_00000_0100111, (rs1+8)->15, (rs2+8)->20, (offset>>5)->25, (offset&0b11111)->7)
+                },
+                (0b110, 0b00) => { // SW
+                    let offset = assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
+                    let (rs1, rs2) = extract!((9..7), (4..2));
+                    assemble!(0b010_00000_0100011, (rs1+8)->15, (rs2+8)->20, (offset>>5)->25, (offset&0b11111)->7)
+                },
+                (0b111, 0b00) => { // FSW
+                    let offset = assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
+                    let (rs1, rs2) = extract!((9..7), (4..2));
+                    assemble!(0b010_00000_0100111, (rs1+8)->15, (rs2+8)->20, (offset>>5)->25, (offset&0b11111)->7)
+                },
+                (0b000, 0b01) => { // ADDI
+                    let rd = extract!((11..7));
+                    let imm = assemble!(0, (~12..12)->5, (6..2)->0);
+                    self.put_register(rd, self.get_register(rd).wrapping_add(imm));
+                    self.put_pc(self.get_pc().wrapping_add(2));
+                    env.account_generic_op();
+                    return Ok(())
+                },
+                (0b001, 0b01) => { // JAL
+                    // what the
+                    let imm = assemble!(0, (~12..12)->11, (11..11)->4, (10..9)->8, (8..8)->10, (7..7)->6, (6..6)->7, (5..3)->1, (2..2)->5);
+                    self.put_register(1, this_pc.wrapping_add(2));
+                    self.put_pc(self.get_pc().wrapping_add(imm) & !1);
+                    env.account_jump_op();
+                    return Ok(())
+                },
+                (0b010, 0b01) => { // LI
+                    let imm = assemble!(0, (~12..12)->5, (6..2)->0);
+                    let rd = extract!((11..7));
+                    self.put_register(rd, imm);
+                    self.put_pc(this_pc.wrapping_add(2));
+                    env.account_generic_op();
+                    return Ok(())
+                },
+                (0b011, 0b01) => {
+                    let rd = extract!((11..7));
+                    if rd == 2 { // ADDI16SP
+                        let imm = assemble!(0, (~12..12)->9, (6..6)->4, (5..5)->6, (4..3)->7, (2..2)->5);
+                        self.put_register(2, self.get_register(2).wrapping_add(imm));
+                        self.put_pc(this_pc.wrapping_add(2));
+                        env.account_generic_op();
+                        return Ok(())
+                    } else { // LUI
+                        let imm = assemble!(0, (~12..12)->17, (6..2)->12);
+                        if imm == 0 { illegal!() }
+                        self.put_register(rd, imm);
+                        self.put_pc(this_pc.wrapping_add(2));
+                        env.account_generic_op();
+                        return Ok(())
+                    }
+                },
+                (0b100, 0b01) => { // arithmetic operations!
+                    let (funct2, rd) = extract!((11..10), (9..7));
+                    let rd = rd + 8;
+                    match funct2 {
+                        0 => { // SRLI
+                            if extract!((12..12)) != 0 { illegal!() }
+                            let amt = extract!((6..2));
+                            self.put_register(rd, self.get_register(rd) >> amt as i32);
+                            self.put_pc(this_pc.wrapping_add(2));
+                            env.account_generic_op();
+                            return Ok(())
+                        },
+                        1 => { // SRAI
+                            if extract!((12..12)) != 0 { illegal!() }
+                            let amt = extract!((6..2));
+                            self.put_register(rd, (self.get_register(rd) as i32 >> amt as i32) as u32);
+                            self.put_pc(this_pc.wrapping_add(2));
+                            env.account_generic_op();
+                            return Ok(())
+                        },
+                        2 => { // ANDI
+                            let imm = assemble!(0, (~12..12)->5, (6..2)->0);
+                            self.put_register(rd, self.get_register(rd)&imm);
+                            self.put_pc(this_pc.wrapping_add(2));
+                            env.account_generic_op();
+                            return Ok(())
+                        },
+                        3 => { // and the rest
+                            let (op, rs2) = extract!((6..5), (4..2));
+                            let rs2 = rs2 + 8;
+                            match op {
+                                0 => self.put_register(rd, self.get_register(rd).wrapping_sub(self.get_register(rs2))), // SUB
+                                1 => self.put_register(rd, self.get_register(rd)^ self.get_register(rs2)), // XOR
+                                2 => self.put_register(rd, self.get_register(rd) | self.get_register(rs2)), // OR
+                                3 => self.put_register(rd, self.get_register(rd) & self.get_register(rs2)), // AND
+                                _ => illegal!(),
+                            }
+                            self.put_pc(this_pc.wrapping_add(2));
+                            env.account_generic_op();
+                            return Ok(())
+                        },
+                        _ => unreachable!(),
+                    }
+                },
+                (0b101, 0b01) => { // J
+                    let imm = assemble!(0, (~12..12)->11, (11..11)->4, (10..9)->8, (8..8)->10, (7..7)->6, (6..6)->7, (5..3)->1, (2..2)->5);
+                    self.put_pc(this_pc.wrapping_add(imm) & !1);
+                    env.account_jump_op();
+                    return Ok(())
+                },
+                (0b110, 0b01) => { // BEQZ
+                    let rs1 = extract!((9..7))+8;
+                    if self.get_register(rs1) == 0 {
+                        let offset = assemble!(0, (~12..12)->8, (11..10)->3, (6..5)->6, (4..3)->1, (2..2)->5);
+                        self.put_pc(this_pc.wrapping_add(offset));
+                        env.account_branch_op(true, offset & 0x80000000 == 0);
+                    } else {
+                        self.put_pc(this_pc.wrapping_add(2));
+                        env.account_branch_op(false, orig_instruction & (1<<12) != 0);
+                    }
+                    return Ok(())
+                },
+                (0b111, 0b01) => { // BNEZ
+                    let rs1 = extract!((9..7))+8;
+                    if self.get_register(rs1) != 0 {
+                        let offset = assemble!(0, (~12..12)->8, (11..10)->3, (6..5)->6, (4..3)->1, (2..2)->5);
+                        self.put_pc(this_pc.wrapping_add(offset));
+                        env.account_branch_op(true, offset & 0x80000000 == 0);
+                    } else {
+                        self.put_pc(this_pc.wrapping_add(2));
+                        env.account_branch_op(false, orig_instruction & (1<<12) != 0);
+                    }
+                    return Ok(())
+                },
+                (0b000, 0b10) => { // SLLI
+                    if extract!((12..12)) != 0 { illegal!() }
+                    let (rd, shamt) = extract!((11..7), (6..2));
+                    self.put_register(rd, self.get_register(rd) << shamt as i32);
+                    self.put_pc(this_pc.wrapping_add(2));
+                    env.account_generic_op();
+                    return Ok(())
+                },
+                (0b001, 0b10) => { // FLDSP
+                    let rs = 2;
+                    let rd = extract!((11..7));
+                    let offset = assemble!(0, (12..12)->5, (6..5)->3, (4..2)->6);
+                    assemble!(0b011_00000_0000111, offset->20, rd->7, rs->15)
+                },
+                (0b010, 0b10) => { // LWSP
+                    let rs = 2;
+                    let rd = extract!((11..7));
+                    if rd == 0 { illegal!() }
+                    let offset = assemble!(0, (12..12)->5, (6..4)->2, (3..2)->6);
+                    assemble!(0b010_00000_0000011, offset->20, rd->7, rs->15)
+                },
+                (0b011, 0b10) => { // FLWSP
+                    let rs = 2;
+                    let rd = extract!((11..7));
+                    let offset = assemble!(0, (12..12)->5, (6..4)->2, (3..2)->6);
+                    assemble!(0b010_00000_0000111, offset->20, rd->7, rs->15)
+                },
+                (0b100, 0b10) => {
+                    let (twelve, rs1, rs2) = extract!((12..12), (11..7), (6..2));
+                    match (twelve, rs1, rs2) {
+                        (0, rs1, 0) => { // JR
+                            if rs1 == 0 { illegal!() }
+                            self.put_pc(self.get_register(rs1) & !1);
+                            env.account_jump_op();
+                            return Ok(())
+                        },
+                        (0, rd, rs2) => { // MV
+                            debug_assert!(rs2 != 0);
+                            self.put_register(rd, self.get_register(rs2));
+                            self.put_pc(this_pc.wrapping_add(2));
+                            env.account_generic_op();
+                            return Ok(())
+                        },
+                        (1, 0, 0) => { // EBREAK
+                            0b000000000001_00000_000_00000_111011
+                        },
+                        (1, rs1, 0) => { // JALR
+                            debug_assert!(rs1 != 0);
+                            let dst = self.get_register(rs1);
+                            self.put_register(1, this_pc.wrapping_add(2));
+                            self.put_pc(dst & !1);
+                            env.account_jump_op();
+                            return Ok(())
+                        },
+                        (1, rd, rs2) => { // ADD
+                            assemble!(0b0110011, rd -> 7, rd -> 15, rs2 -> 20)
+                        },
+                        _ => unreachable!(),
+                    }
+                },
+                (0b101, 0b10) => { // FSDSP
+                    let rs = 2;
+                    let rd = extract!((6..2));
+                    let offset = assemble!(0, (12..10)->3, (9..7)->6);
+                    assemble!(0b011_00000_0100111, rd -> 20, rs -> 15, (offset >> 5) -> 25, (offset & 0b11111) -> 7)
+                },
+                (0b110, 0b10) => { // SWSP
+                    let rs = 2;
+                    let rd = extract!((6..2));
+                    let offset = assemble!(0, (12..9)->2, (8..7)->6);
+                    assemble!(0b010_00000_0100011, rd -> 20, rs -> 15, (offset >> 5) -> 25, (offset & 0b11111) -> 7)
+                },
+                (0b111, 0b10) => { // FSWSP
+                    let rs = 2;
+                    let rd = extract!((6..2));
+                    let offset = assemble!(0, (12..9)->2, (8..7)->6);
+                    assemble!(0b010_00000_0100111, rd -> 20, rs -> 15, (offset >> 5) -> 25, (offset & 0b11111) -> 7)
+                },
+                _ => illegal!()
+            };
+            // 16-bit instructions are 2 bytes long
+            (orig_instruction, decoded_instruction, this_pc.wrapping_add(2))
+            // 32-bit instructions are 4 bytes long
+        } else { (orig_instruction, orig_instruction, this_pc.wrapping_add(4)) };
+        #[cfg(not(feature="C"))]
+        if Env::SUPPORT_C && env.enable_c() { panic!("Your crate skipped compiling RV32C support but then enabled it!") }
+        #[cfg(not(feature="C"))]
+        let (instruction, orig_instruction, mut next_pc) = (orig_instruction, orig_instruction, this_pc.wrapping_add(4));
         let opcode = (instruction >> 2) & 0b11111;
         // I don't want to calculate these when they're not used, but I don't
         // want to repeat myself either. Fortunately for me, yesterday I
         // learned that Rust's macro identifier hygiene rules includes lexical
         // scope!
+        macro_rules! illegal {
+            () => { return Err((ExceptionCause::IllegalInstruction, orig_instruction)) };
+        }
         macro_rules! funct3 { () => { (instruction >> 12) & 0b111 }; }
         macro_rules! funct7 { () => { (instruction >> 25) & 0b1111111 }; }
         macro_rules! rs1 { () => { (instruction >> 15) & 0b11111 }; }
@@ -365,7 +646,7 @@ impl<F: FloatBits> Cpu<F> {
                     0b100 => rustc_apfloat::Round::NearestTiesToAway,
                     // invalid rounding mode, whether dynamic or static, is an
                     // illegal instruction
-                    _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                    _ => illegal!(),
                 }
             }};
         }
@@ -416,7 +697,7 @@ impl<F: FloatBits> Cpu<F> {
                             }
                         ),*
                     }
-                    _ => return Err((ExceptionCause::IllegalInstruction, instruction))
+                    _ => illegal!()
                 }
             }};
         }
@@ -480,7 +761,7 @@ impl<F: FloatBits> Cpu<F> {
                         map_load(address, env.read_word(address, !0))?
                     }
                     _ => {
-                        return Err((ExceptionCause::IllegalInstruction,0))
+                        illegal!()
                     }
                 };
                 self.put_register(rd!(), result);
@@ -537,7 +818,7 @@ impl<F: FloatBits> Cpu<F> {
                         // (treat as no-op)
                     }
                     _ => {
-                        return Err((ExceptionCause::IllegalInstruction,0))
+                        illegal!()
                     }
                 }
             }
@@ -547,7 +828,7 @@ impl<F: FloatBits> Cpu<F> {
                 let alt = op == 0b101 && (instruction & (1 << 30)) != 0;
                 let a = self.get_register(rs1!());
                 let b = imm12!();
-                self.put_register(rd!(), alu_op(alt, op, a, b).map_err(|x| (x, instruction))?);
+                self.put_register(rd!(), alu_op(alt, op, a, b).map_err(|x| (x, orig_instruction))?);
                 env.account_alu_op();
             }
             0b00101 => {
@@ -567,7 +848,7 @@ impl<F: FloatBits> Cpu<F> {
                     map_store(address, env.write_half(address, word as u16))?,
                     0b010 =>
                     map_store(address, env.write_word(address, word, !0))?,
-                    _ => return Err((ExceptionCause::IllegalInstruction,0))
+                    _ => illegal!()
                 }
                 env.account_memory_store(address);
             }
@@ -608,7 +889,7 @@ impl<F: FloatBits> Cpu<F> {
                 let amop = instruction >> 27;
                 let aq = instruction & (1<<26) != 0;
                 let rl = instruction & (1<<26) != 0;
-                self.perform_amo(env,amop,rd!(),rs1!(),rs2!(),aq,rl,instruction)?;
+                self.perform_amo(env,amop,rd!(),rs1!(),rs2!(),aq,rl,orig_instruction)?;
                 env.account_amo_op();
             }
             0b01100 => {
@@ -617,12 +898,12 @@ impl<F: FloatBits> Cpu<F> {
                 let b = self.get_register(rs2!());
                 let result = match funct7!() {
                     0b0000000 => {
-                        let x = alu_op(false, funct3!(), a, b).map_err(|x| (x, instruction))?;
+                        let x = alu_op(false, funct3!(), a, b).map_err(|x| (x, orig_instruction))?;
                         env.account_alu_op();
                         x
                     },
                     0b0100000 => {
-                        let x = alu_op(true, funct3!(), a, b).map_err(|x| (x, instruction))?;
+                        let x = alu_op(true, funct3!(), a, b).map_err(|x| (x, orig_instruction))?;
                         env.account_alu_op();
                         x
                     },
@@ -673,7 +954,7 @@ impl<F: FloatBits> Cpu<F> {
                         },
                         _ => unreachable!(),
                     },
-                    _ => return Err((ExceptionCause::IllegalInstruction,instruction))
+                    _ => return Err((ExceptionCause::IllegalInstruction,orig_instruction))
                 };
                 self.put_register(rd!(), result);
             }
@@ -790,7 +1071,7 @@ impl<F: FloatBits> Cpu<F> {
                                 // quad
                                 let a = F::unbox_quad(a);
                                 let result = if env.use_accurate_single_sqrt(){
-                                    return Err((ExceptionCause::IllegalInstruction, instruction))
+                                    illegal!()
                                 } else {
                                     let (result, iterations) = ieee_apsqrt::sqrt_fast(a, round_mode!());
                                     env.account_sqrt(4, iterations);
@@ -798,7 +1079,7 @@ impl<F: FloatBits> Cpu<F> {
                                 };
                                 F::box_quad(float::maybe_unstatus(self, result))
                             },
-                            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                            _ => illegal!(),
                         };
                         self.float_registers[rd!() as usize] = o;
                         env.account_generic_op();
@@ -808,7 +1089,7 @@ impl<F: FloatBits> Cpu<F> {
                             0b000 => |_,b| { b }, // FSGNJ
                             0b001 => |_,b| { !b }, // FSGNJN
                             0b010 => |a,b| { a != b}, // FSGNJX
-                            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                            _ => illegal!(),
                         };
                         let a = self.float_registers[rs1!() as usize];
                         let b = self.float_registers[rs2!() as usize];
@@ -843,7 +1124,7 @@ impl<F: FloatBits> Cpu<F> {
                                 let o = (a & (u128::MAX >> 1)) | ((osign as u128) << 127);
                                 self.float_registers[rd!() as usize] = F::box_quad(o);
                             },
-                            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                            _ => illegal!(),
                         }
                         env.account_generic_op();
                     },
@@ -881,7 +1162,7 @@ impl<F: FloatBits> Cpu<F> {
                                 }
                                 env.account_float_binop(T::get_word_count());
                             }),
-                            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                            _ => illegal!(),
                         }
                     },
                     0b01000 => {
@@ -911,7 +1192,7 @@ impl<F: FloatBits> Cpu<F> {
                                 // FCVT.D.Q
                                 fcvt!(Quad -> Double);
                             },
-                            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                            _ => illegal!(),
                         }
                     },
                     0b10100 => { // FCMP (FEQ, FLT, FLE)
@@ -937,7 +1218,7 @@ impl<F: FloatBits> Cpu<F> {
                                 }
                                 env.account_generic_op();
                             }),
-                            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                            _ => illegal!(),
                         }
                     },
                     0b11000 => {
@@ -982,7 +1263,7 @@ impl<F: FloatBits> Cpu<F> {
                                     self.put_register(rd!(), dst as u32);
                                 }
                             },
-                            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                            _ => illegal!(),
                         }
                     },
                     0b11010 => {
@@ -1003,7 +1284,7 @@ impl<F: FloatBits> Cpu<F> {
                                     env.account_fcvt_from_int(T::get_word_count());
                                 });
                             },
-                            _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                            _ => illegal!(),
                         }
                     },
                     0b11100 => match (rs2!(), funct3!()) {
@@ -1036,7 +1317,7 @@ impl<F: FloatBits> Cpu<F> {
                                 env.account_generic_op();
                             });
                         },
-                        _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                        _ => illegal!(),
                     },
                     0b11110 => match (rs2!(), funct3!()) {
                         (0b00000, 0b000) => {
@@ -1045,9 +1326,9 @@ impl<F: FloatBits> Cpu<F> {
                             self.float_registers[rd!() as usize] = F::box_single(a);
                             env.account_generic_op();
                         },
-                        _ => return Err((ExceptionCause::IllegalInstruction, instruction)),
+                        _ => illegal!(),
                     },
-                    _ => return Err((ExceptionCause::IllegalInstruction, instruction))
+                    _ => illegal!()
                 }
             }
             0b11000 => {
@@ -1061,7 +1342,7 @@ impl<F: FloatBits> Cpu<F> {
                     0b101 => (a as i32) >= (b as i32),
                     0b110 => a < b,
                     0b111 => a >= b,
-                    _ => return Err((ExceptionCause::IllegalInstruction,instruction))
+                    _ => return Err((ExceptionCause::IllegalInstruction,orig_instruction))
                 };
                 if should_branch {
                     next_pc = this_pc.wrapping_add(imm_b!());
@@ -1071,7 +1352,7 @@ impl<F: FloatBits> Cpu<F> {
             0b11001 => {
                 // JALR
                 if funct3!() != 0 {
-                    return Err((ExceptionCause::IllegalInstruction,instruction))
+                    return Err((ExceptionCause::IllegalInstruction,orig_instruction))
                 }
                 let offset = imm12!();
                 let base = self.get_register(rs1!());
@@ -1099,7 +1380,7 @@ impl<F: FloatBits> Cpu<F> {
                             env.perform_ebreak(self)?;
                         }
                         _ => {
-                            return Err((ExceptionCause::IllegalInstruction,0))
+                            illegal!()
                         }
                     }
                 } else if env.enable_zicsr() {
@@ -1117,20 +1398,20 @@ impl<F: FloatBits> Cpu<F> {
                         // CSRRCI
                         0b111 => (|old_value, new_value| { old_value & !new_value }, rs1!()),
                         _ => {
-                            return Err((ExceptionCause::IllegalInstruction,0))
+                            illegal!()
                         }
                     };
-                    let result = env.csr_access(self, csr!(), handler, source_value).map_err(|x| (x, instruction))?;
+                    let result = env.csr_access(self, csr!(), handler, source_value).map_err(|x| (x, orig_instruction))?;
                     self.put_register(rd!(), result);
                 } else {
-                    return Err((ExceptionCause::IllegalInstruction,0))
+                    illegal!()
                 }
             }
             _ => {
-                return Err((ExceptionCause::IllegalInstruction,instruction))
+                return Err((ExceptionCause::IllegalInstruction,orig_instruction))
             }
         }
-        if next_pc & 2 == 0 {
+        if (next_pc & 2 == 0) || (Env::SUPPORT_C && env.enable_c()) {
             // the lowest bit is supposed to be ignored, and it's hard to get a
             // 1 in there anyway
             self.put_pc(next_pc & !1);
