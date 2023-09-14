@@ -44,6 +44,11 @@ pub trait ExecutionEnvironment {
     /// byte boundary, **OR** determine and implement unaligned memory access
     /// logic yourself. (See section 2.6 "Load and Store Instructions" of the
     /// RISC-V spec.)
+    ///
+    /// `mask` indicates which byte lanes are active. All-ones indicates a full
+    /// word read. Other values, `0xFFFF0000`, `0x0000FFFF`, `0xFF000000`,
+    /// `0x00FF0000`, `0x0000FF00`, and `0x000000FF`, will only be provided if
+    /// you use the default implementations of `read_half` and `read_byte`.
     fn read_word(&mut self, address: u32, mask: u32) -> Result<u32, MemoryAccessFailure>;
     /// Read one instruction word from memory. If C is enabled, this word might
     /// only be 2-byte aligned. The default implementation calls `read_half`
@@ -80,7 +85,8 @@ pub trait ExecutionEnvironment {
     }
     /// Read a halfword from memory. Return `Err(Unaligned)` if address is not
     /// aligned to a four-byte boundary, **OR** determine and implement
-    /// unaligned memory access logic yourself.
+    /// unaligned memory access logic yourself. Default implementation calls
+    /// `read_word` with an appropriate mask.
     fn read_half(&mut self, address: u32) -> Result<u16, MemoryAccessFailure> {
         if address & 1 != 0 { return Err(MemoryAccessFailure::Unaligned) }
         let lanes = if address & 2 != 0 { 0xFFFF0000 } else { 0x0000FFFF };
@@ -96,6 +102,11 @@ pub trait ExecutionEnvironment {
     }
     /// Write an entire word to memory. `address` is aligned to a four-byte
     /// boundary. `mask` indicates which byte lanes are active.
+    ///
+    /// `mask` indicates which byte lanes are active. All-ones indicates a full
+    /// word write. Other values, `0xFFFF0000`, `0x0000FFFF`, `0xFF000000`,
+    /// `0x00FF0000`, `0x0000FF00`, and `0x000000FF`, will only be provided if
+    /// you use the default implementations of `write_half` and `write_byte`.
     fn write_word(&mut self, address: u32, data: u32, mask: u32) -> Result<(), MemoryAccessFailure>;
     /// Write a halfword to memory. `address` is aligned to a two-byte
     /// boundary. Default implementation calls `write_word` with an appropriate
