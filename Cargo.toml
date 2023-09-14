@@ -3,8 +3,10 @@ name = "rrv32"
 version = "0.1.0"
 edition = "2021"
 default-run = "ttybox"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT OR Apache-2.0"
+authors = ["Solra Bizna <solra@bizna.name>"]
+description = "A modular RV32GCQ implementation in Rust"
+repository = "https://github.com/SolraBizna/rrv32"
 
 [dependencies]
 anyhow = "1.0.72"
