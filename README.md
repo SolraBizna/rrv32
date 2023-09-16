@@ -12,10 +12,6 @@ This crate doesn't provide its own execution environment, assembler, linker, or 
 
 All extensions listed below can be turned on or off by your `ExecutionEnvironment` implementation.
 
-## I (base RV32)
-
-I is always enabled, i.e. there is no provision to simulate RV32E.
-
 ## M (multiplication and division)
 
 Full support.
