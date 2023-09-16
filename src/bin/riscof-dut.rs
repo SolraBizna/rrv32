@@ -6,7 +6,7 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
 };
 
-use rrv32::{Cpu, ExceptionCause, ExecutionEnvironment, FloatBits, MemoryAccessFailure};
+use rrv32::{ExceptionCause, ExecutionEnvironment, FloatBits, MemoryAccessFailure};
 
 fn print_usage_and_exit(fatal: bool) {
     println!("Usage: riscof-dut --isa=imafdq --signature-path=PATH --exe-path=PATH");
@@ -380,23 +380,13 @@ impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment for Elfo<
         if self.reserved_addr != address { return Ok(false) }
         self.write_word(address, data, !0).map(|_| true)
     }
-    fn csr_access<F:FloatBits>(&mut self, cpu: &mut Cpu<F>, csr_number: u32, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32, ExceptionCause> {
-        if F::SUPPORT_F && self.enable_f() {
-            match csr_number {
-                0x001 => return cpu.access_fflags(handler, operand),
-                0x002 => return cpu.access_frm(handler, operand),
-                0x003 => return cpu.access_fcsr(handler, operand),
-                _ => (),
-            }
-        }
-        match csr_number {
-            0x300 => {
-                // mstatus, no-op
-                return Ok(0)
-            },
-            _ => (),
-        }
-        Err(ExceptionCause::IllegalInstruction)
+    fn read_csr(&mut self, csr_number: u32) -> Result<u32, ExceptionCause> {
+        if csr_number == 0x300 { return Ok(0) }
+        else { return Err(ExceptionCause::IllegalInstruction) }
+    }
+    fn write_csr(&mut self, csr_number: u32, _: u32) -> Result<(), ExceptionCause> {
+        if csr_number == 0x300 { return Ok(()) }
+        else { return Err(ExceptionCause::IllegalInstruction) }
     }
 }
 

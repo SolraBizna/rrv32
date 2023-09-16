@@ -63,7 +63,7 @@ impl FloatBits for u64 {
     type CsrType = u32;
     fn default_csr() -> u32 { DEFAULT_CSR }
     fn read_csr(csr: &u32) -> u32 { *csr }
-    fn write_csr(csr: &mut u32, value: u32) { *csr = value }
+    fn write_csr(csr: &mut u32, value: u32) { if((value >> 5) &0b111) == 0b111 { panic!() }; *csr = value }
 }
 
 impl FloatBits for u128 {

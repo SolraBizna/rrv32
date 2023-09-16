@@ -153,26 +153,22 @@ pub trait ExecutionEnvironment {
     fn perform_ebreak<F: FloatBits>(&mut self, _cpu: &mut Cpu<F>) -> Result<(), (ExceptionCause, u32)> {
         return Err((ExceptionCause::Breakpoint,0))
     }
-    /// Handle a `CSR*` instruction. Pass the current value to the provided
-    /// closure, use the closure's return value as a new value, and return the
-    /// old value. The default implementation provides the minimum to make
-    /// F/D/Q functional and no others. You should implement those, as well as
-    /// `misa` and the timers.
+    /// Read from a CSR. Return `Err(IllegalInstruction)` if the CSR number is
+    /// not recognized.
     ///
-    /// The default implementation calls `cpu.access_fflags`, `cpu.access_frm`,
-    /// and `cpu.access_fcsr` for the floating point status registers, iff
-    /// floating point support is activated. You should implement these, as
-    /// well as the timing flags shown in table 24.3 "RISC-V control and status
-    /// register (CSR) address map" of the RISC-V standard.
-    fn csr_access<F: FloatBits>(&mut self, cpu: &mut Cpu<F>, csr_number: u32, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32, ExceptionCause> {
-        if F::SUPPORT_F && self.enable_f() {
-            match csr_number {
-                0x001 => return cpu.access_fflags(handler, operand),
-                0x002 => return cpu.access_frm(handler, operand),
-                0x003 => return cpu.access_fcsr(handler, operand),
-                _ => (),
-            }
-        }
+    /// The CPU implements the floating point status registers, if floating
+    /// point is enabled. All other CSRs are your responsibility. The default
+    /// implementation just returns `Err(IllegalInstruction)`.
+    fn read_csr(&mut self, _csr_number: u32) -> Result<u32, ExceptionCause> {
+        Err(ExceptionCause::IllegalInstruction)
+    }
+    /// Write to a CSR. Return `Err(IllegalInstruction)` if the CSR number is
+    /// not recognized.
+    ///
+    /// The CPU implements the floating point status registers, if floating
+    /// point is enabled. All other CSRs are your responsibility. The default
+    /// implementation just returns `Err(IllegalInstruction)`.
+    fn write_csr(&mut self, _csr_number: u32, _new_value: u32) -> Result<(), ExceptionCause> {
         Err(ExceptionCause::IllegalInstruction)
     }
     /// Return true if we should use the slow, exact square root for single

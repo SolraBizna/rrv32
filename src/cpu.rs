@@ -252,7 +252,7 @@ impl<F: FloatBits> Cpu<F> {
             // (see below comment about lexically scoped macros)
             let orig_instruction = orig_instruction & 0xFFFF;
             macro_rules! illegal {
-                () => { return Err((ExceptionCause::IllegalInstruction, orig_instruction)) };
+                () => {return Err((ExceptionCause::IllegalInstruction, orig_instruction)) };
             }
             macro_rules! extracted {
                 (($hi:literal .. $lo:literal)) => {
@@ -1000,7 +1000,7 @@ impl<F: FloatBits> Cpu<F> {
                 // most float ops
                 match rs3!() {
                     0b00000 => float_op!(T; o = a, b; {
-                        o = a.add_r(b, round_mode!()); // FADD.{S,D,Q}\
+                        o = a.add_r(b, round_mode!()); // FADD.{S,D,Q}
                         env.account_float_binop(T::get_word_count());
                     }),
                     0b00001 => float_op!(T; o = a, b; {
@@ -1042,41 +1042,34 @@ impl<F: FloatBits> Cpu<F> {
                             0b00 => {
                                 // single
                                 let a = F::unbox_single(a);
-                                let result = if env.use_accurate_single_sqrt(){
-                                    let (result, iterations) = ieee_apsqrt::sqrt_accurate(a, round_mode!());
-                                    env.account_sqrt(1, iterations);
-                                    result
+                                let (result, iterations) = if env.use_accurate_single_sqrt(){
+                                    ieee_apsqrt::sqrt_accurate(a, round_mode!())
                                 } else {
-                                    let (result, iterations) = ieee_apsqrt::sqrt_fast(a, round_mode!());
-                                    env.account_sqrt(2, iterations);
-                                    result
+                                    ieee_apsqrt::sqrt_fast(a, round_mode!())
                                 };
+                                env.account_sqrt(1, iterations);
                                 F::box_single(float::maybe_unstatus(self, result))
                             },
                             0b01 => {
                                 // double
                                 let a = F::unbox_double(a);
-                                let result = if env.use_accurate_single_sqrt(){
-                                    let (result, iterations) = ieee_apsqrt::sqrt_accurate(a, round_mode!());
-                                    env.account_sqrt(2, iterations);
-                                    result
+                                let (result, iterations) = if env.use_accurate_single_sqrt(){
+                                    ieee_apsqrt::sqrt_accurate(a, round_mode!())
                                 } else {
-                                    let (result, iterations) = ieee_apsqrt::sqrt_fast(a, round_mode!());
-                                    env.account_sqrt(4, iterations);
-                                    result
+                                    ieee_apsqrt::sqrt_fast(a, round_mode!())
                                 };
+                                env.account_sqrt(2, iterations);
                                 F::box_double(float::maybe_unstatus(self, result))
                             },
                             0b11 => {
                                 // quad
                                 let a = F::unbox_quad(a);
-                                let result = if env.use_accurate_single_sqrt(){
+                                let (result, iterations) = if env.use_accurate_single_sqrt(){
                                     illegal!()
                                 } else {
-                                    let (result, iterations) = ieee_apsqrt::sqrt_fast(a, round_mode!());
-                                    env.account_sqrt(4, iterations);
-                                    result
+                                    ieee_apsqrt::sqrt_fast(a, round_mode!())
                                 };
+                                env.account_sqrt(4, iterations);
                                 F::box_quad(float::maybe_unstatus(self, result))
                             },
                             _ => illegal!(),
@@ -1384,25 +1377,28 @@ impl<F: FloatBits> Cpu<F> {
                         }
                     }
                 } else if env.enable_zicsr() {
-                    let (handler, source_value): (fn(u32,u32)->u32, u32) = match funct3!() {
+                    let (handler, source_value, read, write): (fn(u32,u32)->u32, u32, bool, bool) = match funct3!() {
                         // CSRRW
-                        0b001 => (|_old_value, new_value| { new_value }, self.get_register(rs1!())),
+                        0b001 => (|_old_value, new_value| { new_value }, self.get_register(rs1!()), rd!() != 0, true),
                         // CSRRS
-                        0b010 => (|old_value, new_value| { old_value | new_value }, self.get_register(rs1!())),
+                        0b010 => (|old_value, new_value| { old_value | new_value }, self.get_register(rs1!()), true, rs1!() != 0),
                         // CSRRC
-                        0b011 => (|old_value, new_value| { old_value & !new_value }, self.get_register(rs1!())),
+                        0b011 => (|old_value, new_value| { old_value & !new_value }, self.get_register(rs1!()), true, rs1!() != 0),
                         // CSRRWI
-                        0b101 => (|_old_value, new_value| { new_value }, rs1!()),
+                        0b101 => (|_old_value, new_value| { new_value }, rs1!(), rd!() != 0, true),
                         // CSRRSI
-                        0b110 => (|old_value, new_value| { old_value | new_value }, rs1!()),
+                        0b110 => (|old_value, new_value| { old_value | new_value }, rs1!(), true, rs1!() != 0),
                         // CSRRCI
-                        0b111 => (|old_value, new_value| { old_value & !new_value }, rs1!()),
+                        0b111 => (|old_value, new_value| { old_value & !new_value }, rs1!(), true, rs1!() != 0),
                         _ => {
                             illegal!()
                         }
                     };
-                    let result = env.csr_access(self, csr!(), handler, source_value).map_err(|x| (x, orig_instruction))?;
-                    self.put_register(rd!(), result);
+                    let old_value = if !read { 0 }
+                    else { self.read_csr(env, csr!()).map_err(|x| (x, orig_instruction))? };
+                    let new_value = handler(old_value, source_value);
+                    if write { self.write_csr(env, csr!(), new_value).map_err(|x| (x, orig_instruction))?; }
+                    self.put_register(rd!(), old_value);
                 } else {
                     illegal!()
                 }
@@ -1440,34 +1436,53 @@ impl<F: FloatBits> Cpu<F> {
                 }
             })
     }
-    /// Access the `fflags` CSR. If you are not using floating point, will
-    /// just raise an illegal instruction exception.
-    pub fn access_fflags(&mut self, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32,ExceptionCause> {
-        if !F::SUPPORT_F { return Err(ExceptionCause::IllegalInstruction) }
-        let old_value = F::read_csr(&self.fcsr);
-        let new_value = (handler(old_value, operand) & 0b11111) | (old_value & !0b11111);
-        F::write_csr(&mut self.fcsr, new_value);
-        Ok(old_value & 0b11111)
+    pub fn read_csr<Env: ExecutionEnvironment>(&mut self, env: &mut Env, csr_number: u32) -> Result<u32, ExceptionCause> {
+        if F::SUPPORT_F && env.enable_f() {
+            match csr_number {
+                0x001 => return Ok(self.read_fflags()),
+                0x002 => return Ok(self.read_frm()),
+                0x003 => return Ok(self.read_fcsr()),
+                _ => (),
+            }
+        }
+        env.read_csr(csr_number)
     }
-    /// Access the `frm` CSR. If you are not using floating point, will
-    /// just raise an illegal instruction exception.
-    pub fn access_frm(&mut self, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32,ExceptionCause> {
-        if !F::SUPPORT_F { return Err(ExceptionCause::IllegalInstruction) }
-        let old_value = F::read_csr(&self.fcsr);
-        let new_value = ((handler(old_value, operand) & 0b111) << 5) | (old_value & !0b111_00000);
-        F::write_csr(&mut self.fcsr, new_value);
-        Ok((old_value >> 5) & 0b111)
+    pub fn write_csr<Env: ExecutionEnvironment>(&mut self, env: &mut Env, csr_number: u32, new_value: u32) -> Result<(), ExceptionCause> {
+        if F::SUPPORT_F && env.enable_f() {
+            match csr_number {
+                0x001 => return Ok(self.write_fflags(new_value)),
+                0x002 => return Ok(self.write_frm(new_value)),
+                0x003 => return Ok(self.write_fcsr(new_value)),
+                _ => (),
+            }
+        }
+        env.write_csr(csr_number, new_value)
     }
-    /// Access the `fcsr` CSR. If you are not using floating point, will
-    /// just raise an illegal instruction exception.
-    pub fn access_fcsr(&mut self, handler: impl Fn(u32, u32) -> u32, operand: u32) -> Result<u32,ExceptionCause> {
-        // TODO: we can currently access the CSR if the CPU supports F, even if
-        // the extension is disabled in the environment. Is that OK?
-        if !F::SUPPORT_F { return Err(ExceptionCause::IllegalInstruction) }
-        let old_value = F::read_csr(&self.fcsr);
-        let new_value = (handler(old_value, operand) & 0b111_11111) | (old_value & !0b111_11111);
-        F::write_csr(&mut self.fcsr, new_value);
-        Ok(old_value & 0b111_11111)
+    /// Read the `fflags` CSR.
+    pub fn read_fflags(&self) -> u32 {
+        F::read_csr(&self.fcsr) & 0b11111
+    }
+    /// Read the `frm` CSR.
+    pub fn read_frm(&self) -> u32 {
+        (F::read_csr(&self.fcsr) >> 5) & 0b111
+    }
+    /// Read the `fcsr` CSR.
+    pub fn read_fcsr(&self) -> u32 {
+        F::read_csr(&self.fcsr)
+    }
+    /// Write the `fflags` CSR.
+    pub fn write_fflags(&mut self, new_value: u32) {
+        let new_value = (F::read_csr(&self.fcsr) & !0b11111) | (new_value & 0b11111);
+        F::write_csr(&mut self.fcsr, new_value)
+    }
+    /// Write the `frm` CSR.
+    pub fn write_frm(&mut self, new_value: u32) {
+        let new_value = (F::read_csr(&self.fcsr) & !0b111_00000) | ((new_value & 0b111) << 5);
+        F::write_csr(&mut self.fcsr, new_value)
+    }
+    /// Write the `fcsr` CSR.
+    pub fn write_fcsr(&mut self, new_value: u32) {
+        F::write_csr(&mut self.fcsr, new_value & 0b111_11111)
     }
 }
 
