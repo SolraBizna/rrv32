@@ -1,4 +1,4 @@
-This is an RV32GCQ simulation crate. It implements all of the unprivileged behavior of the 32=bit RISC-V I, M, A, F, D, C, Q, Zifence, and Zicsr standards, and provides enough plumbing to implement all of the privileged standard. It has support for roughly accounting for and limiting execution time, which is useful for profiling and/or game design purposes.
+This is an RV32GCQ simulation crate. It implements all of the unprivileged behavior of the 32-bit RISC-V I, M, A, F, D, C, Q, Zifence, and Zicsr standards, and provides enough plumbing to implement all of the privileged standard. It has support for roughly accounting for and limiting execution time, which is useful for profiling and/or game design purposes.
 
 # Why
 
