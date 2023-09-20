@@ -74,7 +74,7 @@ If you want to run RISCOF yourself against `rrv32`, the `riscof-dut` binary in t
 
 # Performance
 
-Running the [`embench-iot`][https://github.com/embench/embench-iot/] benchmark suite:
+Running the [`embench-iot`](https://github.com/embench/embench-iot/) benchmark suite:
 
 |        CPU        | Host speed |  Emu speed  | Worst ratio |
 | ----------------- | ---------- | ----------- | ----------- |
