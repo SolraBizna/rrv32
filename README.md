@@ -68,11 +68,23 @@ Implemented as a no-op.
 - Several `F` tests. I believe all currently-failing tests to be bugs in the reference simulator. (A few of them, I also suspect are *different* bugs in *my* simulator.)
 - `D`: The compliance tests infinite loop and nuke my hard drive, so I can't run them.
 - `A`, `Q`: No official compliance tests.
-- Some tests that assume parts of the privileged ISA have to be manually pruned.
+- Some tests assume parts of the privileged ISA, and have to be manually pruned.
+
+If you want to run RISCOF yourself against `rrv32`, the `riscof-dut` binary in this repository will be of use.
 
 # Performance
 
-The performance of `rrv32` hasn't yet been characterized much. It's faster than the SAIL RISC-V simulator, but that's not exactly a high bar; performance is, for good reasons, low on the SAIL simulator's priority list.
+Running the [`embench-iot`][https://github.com/embench/embench-iot/] benchmark suite:
+
+|        CPU        | Host speed |  Emu speed  | Worst ratio |
+| ----------------- | ---------- | ----------- | ----------- |
+| AMD Ryzen 5 5600X |     4.2GHz | 81-250 MIPS |          52 |
+|   Apple M1 P-core |     3.2GHz | 70-276 MIPS |          46 |
+|   Apple M1 E-core |     1.3GHz |  23-75 MIPS |          57 |
+
+Putting a single ~1MIPS simulated RISC-V core in a singlethreaded game loop should be achievable without unacceptable performance loss. If you want more cores or higher speeds, multithreading will help a great deal. Bear in mind that, depending on what you're doing with them, computers are still useful down to the single digit kHz range!
+
+Performance could be greatly improved with JIT, but I have already gone too far down the rabbit hole... :)
 
 # Legalese
 
