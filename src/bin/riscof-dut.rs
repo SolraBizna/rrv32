@@ -14,14 +14,19 @@ fn print_usage_and_exit(fatal: bool) {
 }
 
 #[derive(Debug)]
-enum FloatISA { None, F, D, Q }
+enum FloatISA {
+    None,
+    F,
+    D,
+    Q,
+}
 
 fn parse_args() -> (String, String, String) {
     let mut isa = None;
     let mut signature_path = None;
     let mut exe_path = None;
     for arg in std::env::args().skip(1) {
-        if let Some((lhs, rhs)) = arg.split_once("=") {
+        if let Some((lhs, rhs)) = arg.split_once('=') {
             match lhs {
                 "--isa" => isa = Some(rhs.to_string()),
                 "--signature-path" => signature_path = Some(rhs.to_string()),
@@ -31,23 +36,23 @@ fn parse_args() -> (String, String, String) {
                         println!("Only supported value for signature-granularity is 4.");
                         std::process::exit(1);
                     }
-                },
+                }
                 _ => {
                     println!("Unknown parameter {lhs:?}");
                     print_usage_and_exit(true);
-                },
+                }
             }
         } else {
             match arg.as_str() {
                 "--isa" | "--signature-path" | "--exe-path" | "--signature-granularity" => {
                     println!("{arg} requires an equals sign and an argument");
                     print_usage_and_exit(true);
-                },
+                }
                 "help" | "--help" | "-h" | "-?" => {
                     print_usage_and_exit(false);
-                },
+                }
                 _ => {
-                    if arg.starts_with("-") {
+                    if arg.starts_with('-') {
                         println!("Unknown option {arg:?}");
                     } else {
                         println!("Unexpected bare parameter {arg:?}.");
@@ -58,12 +63,18 @@ fn parse_args() -> (String, String, String) {
         }
     }
     if isa.is_none() || signature_path.is_none() || exe_path.is_none() {
-        if isa.is_none() { println!("Missing parameter: --isa"); }
-        if signature_path.is_none() { println!("Missing parameter: --signature-path"); }
-        if exe_path.is_none() { println!("Missing parameter: --exe-path"); }
+        if isa.is_none() {
+            println!("Missing parameter: --isa");
+        }
+        if signature_path.is_none() {
+            println!("Missing parameter: --signature-path");
+        }
+        if exe_path.is_none() {
+            println!("Missing parameter: --exe-path");
+        }
         print_usage_and_exit(true);
     }
-    return (isa.unwrap(), signature_path.unwrap(), exe_path.unwrap());
+    (isa.unwrap(), signature_path.unwrap(), exe_path.unwrap())
 }
 
 #[allow(unused)]
@@ -131,8 +142,8 @@ fn read_elf_header(file: &mut File) -> ElfHeader {
 struct ElfProgramHeader {
     p_type: u32,
     p_offset: u32, // Elf32_Off
-    p_vaddr: u32, // Elf32_Addr
-    p_paddr: u32, // Elf32_Addr
+    p_vaddr: u32,  // Elf32_Addr
+    p_paddr: u32,  // Elf32_Addr
     p_filesz: u32,
     p_memsz: u32,
     p_flags: u32,
@@ -167,7 +178,7 @@ struct ElfSectionHeader {
     sh_name: u32,
     sh_type: u32,
     sh_flags: u32,
-    sh_addr: u32, // Elf32_Addr
+    sh_addr: u32,   // Elf32_Addr
     sh_offset: u32, // Elf32_Off
     sh_size: u32,
     sh_link: u32,
@@ -247,71 +258,119 @@ fn load_elf(path: &str) -> LoadedElf {
     let mut f = File::open(path).unwrap();
     let header = read_elf_header(&mut f);
     assert_ne!(header.e_phoff, 0, "No program headers in ELF!");
-    assert_eq!(header.e_phentsize, 32, "Program headers in ELF not 32 bytes long!");
-    let chunks = (0 .. header.e_phnum).filter_map(|n| {
-        f.seek(SeekFrom::Start((header.e_phoff + header.e_phentsize as u32 * n as u32) as u64)).unwrap();
-        let program_header = read_elf_program_header(&mut f);
-        if program_header.p_type != 1 { return None } //only care about PT_LOAD
-        assert_eq!(program_header.p_vaddr, program_header.p_paddr, "ELF seems to assume virtual memory?");
-        assert!(program_header.p_filesz <= program_header.p_memsz, "ELF has a program header with a bigger size on disk than in memory?");
-        f.seek(SeekFrom::Start(program_header.p_offset as u64)).unwrap();
-        assert_eq!(program_header.p_vaddr % 4, 0, "Section not aligned to a 4-byte boundary.");
-        //assert_eq!(program_header.p_filesz % 4, 0, "File size not a multiple of 4.");
-        //assert_eq!(program_header.p_memsz % 4, 0, "Memory size not a multiple of 4.");
-        // Being lazy! Round file and memory size up to a multiple of 4. It
-        // only needs to be good enough to work in the tests...
-        let disk_size = if program_header.p_filesz % 4 == 0 { program_header.p_filesz }
-        else { (program_header.p_filesz & !3) + 4 } as usize;
-        let _mem_size = if program_header.p_memsz % 4 == 0 { program_header.p_memsz }
-        else { (program_header.p_memsz & !3) + 4 } as usize;
-        let mut words = vec![];
-        words.reserve_exact(program_header.p_memsz as usize);
-        let mut buf = [0u8; 4096];
-        let mut rem = disk_size;
-        while rem > 0 {
-            let bytes_to_read = rem.min(buf.len());
-            f.read_exact(&mut buf[..bytes_to_read]).unwrap();
-            rem -= bytes_to_read;
-            for word in buf[..bytes_to_read].chunks_exact(4) {
-                words.push(u32::from_le_bytes([word[0], word[1], word[2], word[3]]));
+    assert_eq!(
+        header.e_phentsize, 32,
+        "Program headers in ELF not 32 bytes long!"
+    );
+    let chunks = (0..header.e_phnum)
+        .filter_map(|n| {
+            f.seek(SeekFrom::Start(
+                (header.e_phoff + header.e_phentsize as u32 * n as u32) as u64,
+            ))
+            .unwrap();
+            let program_header = read_elf_program_header(&mut f);
+            if program_header.p_type != 1 {
+                return None;
+            } //only care about PT_LOAD
+            assert_eq!(
+                program_header.p_vaddr, program_header.p_paddr,
+                "ELF seems to assume virtual memory?"
+            );
+            assert!(
+                program_header.p_filesz <= program_header.p_memsz,
+                "ELF has a program header with a bigger size on disk than in memory?"
+            );
+            f.seek(SeekFrom::Start(program_header.p_offset as u64))
+                .unwrap();
+            assert_eq!(
+                program_header.p_vaddr % 4,
+                0,
+                "Section not aligned to a 4-byte boundary."
+            );
+            //assert_eq!(program_header.p_filesz % 4, 0, "File size not a multiple of 4.");
+            //assert_eq!(program_header.p_memsz % 4, 0, "Memory size not a multiple of 4.");
+            // Being lazy! Round file and memory size up to a multiple of 4. It
+            // only needs to be good enough to work in the tests...
+            let disk_size = if program_header.p_filesz % 4 == 0 {
+                program_header.p_filesz
+            } else {
+                (program_header.p_filesz & !3) + 4
+            } as usize;
+            let _mem_size = if program_header.p_memsz % 4 == 0 {
+                program_header.p_memsz
+            } else {
+                (program_header.p_memsz & !3) + 4
+            } as usize;
+            let mut words = vec![];
+            words.reserve_exact(program_header.p_memsz as usize);
+            let mut buf = [0u8; 4096];
+            let mut rem = disk_size;
+            while rem > 0 {
+                let bytes_to_read = rem.min(buf.len());
+                f.read_exact(&mut buf[..bytes_to_read]).unwrap();
+                rem -= bytes_to_read;
+                for word in buf[..bytes_to_read].chunks_exact(4) {
+                    words.push(u32::from_le_bytes([word[0], word[1], word[2], word[3]]));
+                }
             }
-        }
-        words.resize((program_header.p_memsz / 4) as usize, 0xdeadbeef);
-        Some(LoadedChunk {
-            base: program_header.p_vaddr,
-            words,
+            words.resize((program_header.p_memsz / 4) as usize, 0xdeadbeef);
+            Some(LoadedChunk {
+                base: program_header.p_vaddr,
+                words,
+            })
         })
-    }).collect();
-    assert_eq!(header.e_shentsize, 40, "Section headers in ELF not 40 bytes long!");
+        .collect();
+    assert_eq!(
+        header.e_shentsize, 40,
+        "Section headers in ELF not 40 bytes long!"
+    );
     let mut symtab_header = None;
     let mut strtab_header = None;
-    for section_number in 0 .. header.e_shnum {
-        f.seek(SeekFrom::Start((header.e_shoff + header.e_shentsize as u32 * section_number as u32) as u64)).unwrap();
+    for section_number in 0..header.e_shnum {
+        f.seek(SeekFrom::Start(
+            (header.e_shoff + header.e_shentsize as u32 * section_number as u32) as u64,
+        ))
+        .unwrap();
         let section_header = read_elf_section_header(&mut f);
         if section_header.sh_type == 2 {
             if symtab_header.is_none() {
                 symtab_header = Some(section_header);
-            } else { panic!("Multiple symtabs!") }
+            } else {
+                panic!("Multiple symtabs!")
+            }
         } else if section_header.sh_type == 3 {
             if strtab_header.is_none() {
                 strtab_header = Some(section_header);
-            } else { /* let's skip the second one */ }
-        } else { /* ignore */ }
+            } else { /* let's skip the second one */
+            }
+        } else { /* ignore */
+        }
     }
     let symtab_header = symtab_header.expect("No symtab!");
     let strtab_header = strtab_header.expect("No strtab!");
     let mut strtab = vec![0u8; strtab_header.sh_size as usize];
     assert_eq!(symtab_header.sh_entsize, 16, "Symbols are not 16 bytes?");
-    f.seek(SeekFrom::Start(strtab_header.sh_offset as u64)).unwrap();
+    f.seek(SeekFrom::Start(strtab_header.sh_offset as u64))
+        .unwrap();
     f.read_exact(&mut strtab[..]).unwrap();
     let mut symbol_table = HashMap::new();
-    f.seek(SeekFrom::Start(symtab_header.sh_offset as u64)).unwrap();
-    for _ in (0 .. symtab_header.sh_size).step_by(symtab_header.sh_entsize as usize) {
+    f.seek(SeekFrom::Start(symtab_header.sh_offset as u64))
+        .unwrap();
+    for _ in (0..symtab_header.sh_size).step_by(symtab_header.sh_entsize as usize) {
         let symbol = read_elf_symbol(&mut f);
-        let symbol_name = &strtab[symbol.st_name as usize .. symbol.st_name as usize + strtab[symbol.st_name as usize ..].iter().position(|x| *x==0).unwrap()];
+        let symbol_name = &strtab[symbol.st_name as usize
+            ..symbol.st_name as usize
+                + strtab[symbol.st_name as usize..]
+                    .iter()
+                    .position(|x| *x == 0)
+                    .unwrap()];
         symbol_table.insert(symbol_name.to_vec(), symbol.st_value);
     }
-    LoadedElf { sections: chunks, entry_point: header.e_entry, symbol_table }
+    LoadedElf {
+        sections: chunks,
+        entry_point: header.e_entry,
+        symbol_table,
+    }
 }
 
 struct Elfo<const A: bool, const M: bool, const C: bool> {
@@ -328,103 +387,160 @@ impl<const A: bool, const M: bool, const C: bool> Elfo<A, M, C> {
         for section in elf.sections.iter() {
             let start = ((section.base - 0x80000000) / 4) as usize;
             let len = section.words.len();
-            ram[start..(start+len)].copy_from_slice(&section.words[..]);
+            ram[start..(start + len)].copy_from_slice(&section.words[..]);
         }
-        Elfo { ram, entry_point: elf.entry_point, reserved_addr: !0, tohost: None, symbol_table: elf.symbol_table }
+        Elfo {
+            ram,
+            entry_point: elf.entry_point,
+            reserved_addr: !0,
+            tohost: None,
+            symbol_table: elf.symbol_table,
+        }
     }
     fn take_tohost(&mut self) -> Option<u32> {
         self.tohost.take()
     }
 }
 
-impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment for Elfo<A,M,C> {
+impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment for Elfo<A, M, C> {
     const SUPPORT_A: bool = A;
     const SUPPORT_M: bool = M;
     const SUPPORT_C: bool = C;
     fn read_word(&mut self, address: u32, _mask: u32) -> Result<u32, rrv32::MemoryAccessFailure> {
-        if address % 4 != 0 { return Err(MemoryAccessFailure::Unaligned) }
-        if address == 0xC0000000 { todo!("fromhost") }
-        else if address >= 0x80000000 {
-            let word_offset = ((address - 0x80000000) / 4) as usize;
-            if word_offset >= self.ram.len() { return Err(MemoryAccessFailure::Fault) }
-            return Ok(self.ram[word_offset])
+        if address % 4 != 0 {
+            return Err(MemoryAccessFailure::Unaligned);
         }
-        return Err(MemoryAccessFailure::Fault)
+        if address == 0xC0000000 {
+            todo!("fromhost")
+        } else if address >= 0x80000000 {
+            let word_offset = ((address - 0x80000000) / 4) as usize;
+            if word_offset >= self.ram.len() {
+                return Err(MemoryAccessFailure::Fault);
+            }
+            return Ok(self.ram[word_offset]);
+        }
+        Err(MemoryAccessFailure::Fault)
     }
-    fn write_word(&mut self, address: u32, data: u32, mask: u32) -> Result<(), rrv32::MemoryAccessFailure> {
-        if address % 4 != 0 { return Err(MemoryAccessFailure::Unaligned) }
-        if self.reserved_addr == address { self.reserved_addr = !0 }
+    fn write_word(
+        &mut self,
+        address: u32,
+        data: u32,
+        mask: u32,
+    ) -> Result<(), rrv32::MemoryAccessFailure> {
+        if address % 4 != 0 {
+            return Err(MemoryAccessFailure::Unaligned);
+        }
+        if self.reserved_addr == address {
+            self.reserved_addr = !0
+        }
         if address == 0xC0000000 {
             self.tohost = Some(data);
-            return Ok(())
-        }
-        else if address >= 0x80000000 {
+            return Ok(());
+        } else if address >= 0x80000000 {
             let word_offset = ((address - 0x80000000) / 4) as usize;
-            if word_offset >= self.ram.len() { return Err(MemoryAccessFailure::Fault) }
+            if word_offset >= self.ram.len() {
+                return Err(MemoryAccessFailure::Fault);
+            }
             self.ram[word_offset] &= !mask;
             self.ram[word_offset] |= data & mask;
-            return Ok(())
+            return Ok(());
         }
-        return Err(MemoryAccessFailure::Fault)
+        Err(MemoryAccessFailure::Fault)
     }
     fn load_reserved_word(&mut self, address: u32) -> Result<u32, rrv32::MemoryAccessFailure> {
-        if address % 4 != 0 { return Err(MemoryAccessFailure::Unaligned) }
+        if address % 4 != 0 {
+            return Err(MemoryAccessFailure::Unaligned);
+        }
         let ret = self.read_word(address, !0);
         if ret.is_ok() {
             self.reserved_addr = address;
         }
         ret
     }
-    fn store_reserved_word(&mut self, address: u32, data: u32) -> Result<bool, rrv32::MemoryAccessFailure> {
-        if address % 4 != 0 { return Err(MemoryAccessFailure::Unaligned) }
-        if self.reserved_addr != address { return Ok(false) }
+    fn store_reserved_word(
+        &mut self,
+        address: u32,
+        data: u32,
+    ) -> Result<bool, rrv32::MemoryAccessFailure> {
+        if address % 4 != 0 {
+            return Err(MemoryAccessFailure::Unaligned);
+        }
+        if self.reserved_addr != address {
+            return Ok(false);
+        }
         self.write_word(address, data, !0).map(|_| true)
     }
     fn read_csr(&mut self, csr_number: u32) -> Result<u32, ExceptionCause> {
-        if csr_number == 0x300 { return Ok(0) }
-        else { return Err(ExceptionCause::IllegalInstruction) }
+        if csr_number == 0x300 {
+            Ok(0)
+        } else {
+            Err(ExceptionCause::IllegalInstruction)
+        }
     }
     fn write_csr(&mut self, csr_number: u32, _: u32) -> Result<(), ExceptionCause> {
-        if csr_number == 0x300 { return Ok(()) }
-        else { return Err(ExceptionCause::IllegalInstruction) }
+        if csr_number == 0x300 {
+            Ok(())
+        } else {
+            Err(ExceptionCause::IllegalInstruction)
+        }
     }
 }
 
-fn run_inner<F: FloatBits, const A: bool, const M: bool, const C: bool>(signature_path: &str, mut elfo: Elfo<A,M,C>) {
+fn run_inner<F: FloatBits, const A: bool, const M: bool, const C: bool>(
+    signature_path: &str,
+    mut elfo: Elfo<A, M, C>,
+) {
     let mut cpu = rrv32::Cpu::<F>::new();
     cpu.put_pc(elfo.entry_point);
     loop {
         match cpu.step(&mut elfo) {
             Ok(_) => (),
             Err(x) => {
-                panic!("Error {x:?}, signature_path={signature_path:?}"); 
-            },
+                panic!("Error {x:?}, signature_path={signature_path:?}");
+            }
         }
         match elfo.take_tohost() {
             Some(x) if x & 1 == 1 => {
-                if x == 1 { break } // peacefully stop executing
+                if x == 1 {
+                    break;
+                }
+                // peacefully stop executing
                 else {
                     panic!("Test requested an error exit!");
                 }
-            },
+            }
             None => (),
             Some(tohost) => panic!("Unknown tohost value: {tohost}/0x{tohost:X}"),
         }
     }
-    let sig_begin = *elfo.symbol_table.get(b"rvtest_sig_begin" as &[u8]).expect("missing rvtest_sig_begin symbol");
-    let sig_end = *elfo.symbol_table.get(b"rvtest_sig_end" as &[u8]).expect("missing rvtest_sig_end symbol");
+    let sig_begin = *elfo
+        .symbol_table
+        .get(b"rvtest_sig_begin" as &[u8])
+        .expect("missing rvtest_sig_begin symbol");
+    let sig_end = *elfo
+        .symbol_table
+        .get(b"rvtest_sig_end" as &[u8])
+        .expect("missing rvtest_sig_end symbol");
     assert!(sig_end >= sig_begin);
     assert!(sig_begin % 4 == 0);
     assert!(sig_end % 4 == 0);
     let mut f = File::create(signature_path).unwrap();
-    for sigaddr in (sig_begin .. sig_end).step_by(4) {
-        write!(f, "{:08x}\n", elfo.read_word(sigaddr, !0).unwrap()).unwrap();
+    for sigaddr in (sig_begin..sig_end).step_by(4) {
+        writeln!(f, "{:08x}", elfo.read_word(sigaddr, !0).unwrap()).unwrap();
     }
 }
 
-fn run_outer<F: FloatBits>(signature_path: &str, support_a: bool, support_m: bool, support_c: bool, elf: LoadedElf) {
+fn run_outer<F: FloatBits>(
+    signature_path: &str,
+    support_a: bool,
+    support_m: bool,
+    support_c: bool,
+    elf: LoadedElf,
+) {
     match (support_a, support_m, support_c) {
-        (false, false, false) => run_inner::<F, false, false, false>(signature_path, Elfo::new(elf)),
+        (false, false, false) => {
+            run_inner::<F, false, false, false>(signature_path, Elfo::new(elf))
+        }
         (true, false, false) => run_inner::<F, true, false, false>(signature_path, Elfo::new(elf)),
         (false, true, false) => run_inner::<F, false, true, false>(signature_path, Elfo::new(elf)),
         (true, true, false) => run_inner::<F, true, true, false>(signature_path, Elfo::new(elf)),
@@ -438,26 +554,42 @@ fn run_outer<F: FloatBits>(signature_path: &str, support_a: bool, support_m: boo
 fn main() {
     let (isa, signature_path, exe_path) = parse_args();
     const ISA_PREDICATES: &[fn(&str) -> Option<String>] = &[
-        |isa| if !isa.starts_with("rv32") {
-            Some("ISA must start with 'rv32'".to_string())
-        } else { None },
-        |isa| if !isa[4..].contains("i") {
-            Some("'i' must be present in ISA".to_string())
-        } else { None },
+        |isa| {
+            if !isa.starts_with("rv32") {
+                Some("ISA must start with 'rv32'".to_string())
+            } else {
+                None
+            }
+        },
+        |isa| {
+            if !isa[4..].contains('i') {
+                Some("'i' must be present in ISA".to_string())
+            } else {
+                None
+            }
+        },
         |isa| {
             for el in isa[4..].chars() {
                 if !"imafdqc".contains(el) {
-                    return Some(format!("Unknown ISA extension {el:?}"))
+                    return Some(format!("Unknown ISA extension {el:?}"));
                 }
             }
-            return None
+            None
         },
-        |isa| if isa[4..].contains("q") && !isa[4..].contains("d") {
-            Some("'d' must be present in ISA if 'q' is".to_string())
-        } else { None },
-        |isa| if isa[4..].contains("d") && !isa[4..].contains("f") {
-            Some("'f' must be present in ISA if 'd' is".to_string())
-        } else { None },
+        |isa| {
+            if isa[4..].contains('q') && !isa[4..].contains('d') {
+                Some("'d' must be present in ISA if 'q' is".to_string())
+            } else {
+                None
+            }
+        },
+        |isa| {
+            if isa[4..].contains('d') && !isa[4..].contains('f') {
+                Some("'f' must be present in ISA if 'd' is".to_string())
+            } else {
+                None
+            }
+        },
     ];
     for predicate in ISA_PREDICATES.iter() {
         if let Some(error) = predicate(isa.as_str()) {
@@ -465,14 +597,18 @@ fn main() {
             std::process::exit(1);
         }
     }
-    let float_isa =
-        if isa[4..].contains("q") { FloatISA::Q }
-        else if isa[4..].contains("d") { FloatISA::D }
-        else if isa[4..].contains("f") { FloatISA::F }
-        else { FloatISA::None };
-    let support_a = isa[4..].contains("a");
-    let support_m = isa[4..].contains("m");
-    let support_c = isa[4..].contains("c");
+    let float_isa = if isa[4..].contains('q') {
+        FloatISA::Q
+    } else if isa[4..].contains('d') {
+        FloatISA::D
+    } else if isa[4..].contains('f') {
+        FloatISA::F
+    } else {
+        FloatISA::None
+    };
+    let support_a = isa[4..].contains('a');
+    let support_m = isa[4..].contains('m');
+    let support_c = isa[4..].contains('c');
     let elf = load_elf(&exe_path);
     match float_isa {
         FloatISA::None => run_outer::<()>(&signature_path, support_a, support_m, support_c, elf),
