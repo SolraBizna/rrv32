@@ -2,7 +2,7 @@ This is an RV32GCQ simulation crate. It implements all of the unprivileged behav
 
 # Why
 
-At least one of my students is working on a RISC-V implementation. When teaching, I find it useful to have my own implementation of a given ISA handy. It can spot check my student's implementation, and clarify ambiguous [or confusing](https://cdn.discordapp.com/attachments/340907123510607873/1151757802554019910/Screenshot_2023-09-13_at_11.53.44_PM.png) points of the relevant standards.
+At least one of my students is working on a RISC-V implementation. When teaching, I find it useful to have my own implementation of a given ISA handy. It can spot check my student's implementation, and clarify ambiguous or confusing points of the relevant standards.
 
 I also like it when games have real computers in them. Games like _Stationeers_, _Duskers_, _Hacknet_ have computers in them, but they always come with their own limitations and concessions. Lua or JavaScript are often used to solve this problem, but that brings in a whole different set of problems. If there were a permissibly-licensed, freely-available library that provided a self-contained "real" computer system, the barrier to entry is significantly lowered for including "real" computer systems in games. My W65C02S emulators technically already provide this, but, shockingly, nobody wants to program 6502 assembly in games. With a modular RISC-V simulator, programming in C or even a language like Rust becomes possible.
 
@@ -25,11 +25,11 @@ Full support. The burden of implementing reserved load/store is on your `Executi
 F/D/Q support depends on the specialization of `Cpu`.
 
 - `Cpu<()>`: Default. No floating point support. CPU state is 128 bytes. 
-- `Cpu<f32>`: F (single precision) support only. CPU state is 260 bytes.
-- `Cpu<f64>`: D (double precision) and F support. CPU state is 388 or 392 bytes depending on your architecture.
-- `Cpu<f128>`: Q (quad precision) and D and F support. CPU state is 644, 648, or 656 bytes depending on your architecture.
+- `Cpu<u32>`: F (single precision) support only. CPU state is 260 bytes.
+- `Cpu<u64>`: D (double precision) and F support. CPU state is 388 or 392 bytes depending on your architecture.
+- `Cpu<u128>`: Q (quad precision) and D and F support. CPU state is 644, 648, or 656 bytes depending on your architecture.
 
-G requires D, so to actually simulate RV32G, make sure you specify `<f64>` on your `Cpu`.
+G requires D, so to actually simulate RV32G, make sure you specify `<u64>` on your `Cpu`.
 
 Double- and quad-precision floating point loads and stores are NOT ATOMIC. This is allowed by the standard, at least for 32-bit cores. They also only require 4-byte alignment. This simulator doesn't provide a way to fault on non-8-byte-aligned double loads and stores. If you need that behavior for some reason, sorry!
 
