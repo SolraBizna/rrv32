@@ -13,21 +13,42 @@ mod float {
         const SUPPORT_D: bool = false;
         const SUPPORT_Q: bool = false;
         type CsrType;
+        type StatusType: FloatStatusTrait;
         fn default_csr() -> Self::CsrType;
         fn read_csr(_: &Self::CsrType) -> u32;
         fn write_csr(_: &mut Self::CsrType, _: u32);
     }
     impl FloatBits for () {
         type CsrType = ();
+        type StatusType = ();
         fn default_csr() {}
         fn read_csr(_: &()) -> u32 {
             0
         }
         fn write_csr(_: &mut Self::CsrType, _: u32) {}
     }
+    pub trait FloatStatusTrait: Default + Clone {
+        fn set_bits(&mut self, bits: u8);
+        fn get_bits(&self) -> u8;
+        fn make_dirty(&mut self);
+        fn is_active(&self) -> bool;
+    }
+    impl FloatStatusTrait for () {
+        fn set_bits(&mut self, _bits: u8) {
+            // do nothing
+        }
+        fn get_bits(&self) -> u8 {
+            0b00
+        }
+        fn make_dirty(&mut self) {
+            // do nothing
+        }
+        fn is_active(&self) -> bool {
+            false
+        }
+    }
 }
 pub use float::FloatBits;
-#[cfg(feature = "float")]
 use float::*;
 #[cfg(feature = "float")]
 use rustc_apfloat::{
@@ -89,6 +110,7 @@ pub struct Cpu<F: FloatBits = ()> {
     registers: [u32; 32], // pc is stored where x0 would be
     float_registers: [F; 32],
     fcsr: F::CsrType,
+    fstatus: F::StatusType,
 }
 
 fn alu_op(alt: bool, op: u32, a: u32, b: u32) -> Result<u32, ExceptionCause> {
@@ -158,6 +180,7 @@ impl<F: FloatBits> Cpu<F> {
             registers: [0; 32],
             float_registers: Default::default(),
             fcsr: F::default_csr(),
+            fstatus: Default::default(),
         }
     }
     /// Return the current value of the PC, i.e. the instruction that will be
@@ -757,7 +780,12 @@ impl<F: FloatBits> Cpu<F> {
         #[allow(unused_macros)]
         macro_rules! frd {
             ($value:expr) => {
-                self.float_registers[rd!() as usize] = $value
+                let rd = rd!() as usize;
+                let value = $value;
+                if self.float_registers[rd] != value {
+                    self.fstatus.set_bits(0b11);
+                    self.float_registers[rd!() as usize] = value;
+                }
             };
         }
         #[allow(unused_macros)]
@@ -947,8 +975,9 @@ impl<F: FloatBits> Cpu<F> {
                 let mut entrocrime = false;
                 let o: StatusAnd<fap!($to)> =
                     ftoap!($from)(a).convert_r(round_mode!(), &mut entrocrime);
-                self.float_registers[rd!() as usize] =
-                    fbox!($to)(float::maybe_unstatus(self, o).to_bits() as fbits!($to));
+                frd!(fbox!($to)(
+                    float::maybe_unstatus(self, o).to_bits() as fbits!($to)
+                ));
             };
         }
         match opcode {
@@ -982,6 +1011,8 @@ impl<F: FloatBits> Cpu<F> {
                 self.put_register(rd!(), result);
                 env.account_memory_load(address);
             }
+            #[cfg(feature = "float")]
+            0b00001 if !self.fstatus.is_active() => illegal!(),
             #[cfg(feature = "float")]
             0b00001 if F::SUPPORT_F && env.enable_f() && funct3!() == 0b010 => {
                 // FLW
@@ -1066,6 +1097,8 @@ impl<F: FloatBits> Cpu<F> {
                 }
                 env.account_memory_store(address);
             }
+            #[cfg(feature = "float")]
+            0b01001 if !self.fstatus.is_active() => illegal!(),
             #[cfg(feature = "float")]
             0b01001 if F::SUPPORT_F && env.enable_f() && funct3!() == 0b010 => {
                 // FSW
@@ -1203,6 +1236,8 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_generic_op();
             }
             #[cfg(feature = "float")]
+            0b10000 if !self.fstatus.is_active() => illegal!(),
+            #[cfg(feature = "float")]
             0b10000 => {
                 // FMADD.{S,D,Q}
                 float_op!(T; o = a, b, c; {
@@ -1210,6 +1245,8 @@ impl<F: FloatBits> Cpu<F> {
                     env.account_float_ternop(T::get_word_count());
                 });
             }
+            #[cfg(feature = "float")]
+            0b10001 if !self.fstatus.is_active() => illegal!(),
             #[cfg(feature = "float")]
             0b10001 => {
                 // FMSUB.{S,D,Q}
@@ -1219,6 +1256,8 @@ impl<F: FloatBits> Cpu<F> {
                 });
             }
             #[cfg(feature = "float")]
+            0b10010 if !self.fstatus.is_active() => illegal!(),
+            #[cfg(feature = "float")]
             0b10010 => {
                 // FNMADD.{S,D,Q}
                 float_op!(T; o = a, b, c; {
@@ -1227,6 +1266,8 @@ impl<F: FloatBits> Cpu<F> {
                 });
             }
             #[cfg(feature = "float")]
+            0b10011 if !self.fstatus.is_active() => illegal!(),
+            #[cfg(feature = "float")]
             0b10011 => {
                 // FNMSUB.{S,D,Q}
                 float_op!(T; o = a, b, c; {
@@ -1234,6 +1275,8 @@ impl<F: FloatBits> Cpu<F> {
                     env.account_float_ternop(T::get_word_count());
                 });
             }
+            #[cfg(feature = "float")]
+            0b10100 if !self.fstatus.is_active() => illegal!(),
             #[cfg(feature = "float")]
             0b10100 => {
                 // most float ops
@@ -1313,7 +1356,7 @@ impl<F: FloatBits> Cpu<F> {
                             }
                             _ => illegal!(),
                         };
-                        self.float_registers[rd!() as usize] = o;
+                        frd!(o);
                         env.account_generic_op();
                     }
                     0b00100 => {
@@ -1334,7 +1377,7 @@ impl<F: FloatBits> Cpu<F> {
                                 let bsign = b >> 31 != 0;
                                 let osign = op(asign, bsign);
                                 let o = (a & (u32::MAX >> 1)) | ((osign as u32) << 31);
-                                self.float_registers[rd!() as usize] = F::box_single(o);
+                                frd!(F::box_single(o));
                             }
                             0b01 => {
                                 // double
@@ -1344,7 +1387,7 @@ impl<F: FloatBits> Cpu<F> {
                                 let bsign = b >> 63 != 0;
                                 let osign = op(asign, bsign);
                                 let o = (a & (u64::MAX >> 1)) | ((osign as u64) << 63);
-                                self.float_registers[rd!() as usize] = F::box_double(o);
+                                frd!(F::box_double(o));
                             }
                             0b11 => {
                                 // quad
@@ -1354,7 +1397,7 @@ impl<F: FloatBits> Cpu<F> {
                                 let bsign = b >> 127 != 0;
                                 let osign = op(asign, bsign);
                                 let o = (a & (u128::MAX >> 1)) | ((osign as u128) << 127);
-                                self.float_registers[rd!() as usize] = F::box_quad(o);
+                                frd!(F::box_quad(o));
                             }
                             _ => illegal!(),
                         }
@@ -1556,7 +1599,7 @@ impl<F: FloatBits> Cpu<F> {
                         (0b00000, 0b000) => {
                             // FMV.W.X
                             let a = self.get_register(rs1!());
-                            self.float_registers[rd!() as usize] = F::box_single(a);
+                            frd!(F::box_single(a));
                             env.account_generic_op();
                         }
                         _ => illegal!(),
@@ -1717,9 +1760,24 @@ impl<F: FloatBits> Cpu<F> {
     ) -> Result<u32, ExceptionCause> {
         if F::SUPPORT_F && env.enable_f() {
             match csr_number {
-                0x001 => return Ok(self.read_fflags()),
-                0x002 => return Ok(self.read_frm()),
-                0x003 => return Ok(self.read_fcsr()),
+                0x001 => {
+                    if !self.fstatus.is_active() {
+                        return Err(ExceptionCause::IllegalInstruction);
+                    }
+                    return Ok(self.read_fflags());
+                }
+                0x002 => {
+                    if !self.fstatus.is_active() {
+                        return Err(ExceptionCause::IllegalInstruction);
+                    }
+                    return Ok(self.read_frm());
+                }
+                0x003 => {
+                    if !self.fstatus.is_active() {
+                        return Err(ExceptionCause::IllegalInstruction);
+                    }
+                    return Ok(self.read_fcsr());
+                }
                 _ => (),
             }
         }
@@ -1734,9 +1792,24 @@ impl<F: FloatBits> Cpu<F> {
         if F::SUPPORT_F && env.enable_f() {
             #[allow(clippy::unit_arg)]
             match csr_number {
-                0x001 => return Ok(self.write_fflags(new_value)),
-                0x002 => return Ok(self.write_frm(new_value)),
-                0x003 => return Ok(self.write_fcsr(new_value)),
+                0x001 => {
+                    if !self.fstatus.is_active() {
+                        return Err(ExceptionCause::IllegalInstruction);
+                    }
+                    return Ok(self.write_fflags(new_value));
+                }
+                0x002 => {
+                    if !self.fstatus.is_active() {
+                        return Err(ExceptionCause::IllegalInstruction);
+                    }
+                    return Ok(self.write_frm(new_value));
+                }
+                0x003 => {
+                    if !self.fstatus.is_active() {
+                        return Err(ExceptionCause::IllegalInstruction);
+                    }
+                    return Ok(self.write_fcsr(new_value));
+                }
                 _ => (),
             }
         }
@@ -1754,6 +1827,13 @@ impl<F: FloatBits> Cpu<F> {
     pub fn read_fcsr(&self) -> u32 {
         F::read_csr(&self.fcsr)
     }
+    /// Read the `FS` bits for the `mstatus`/`sstatus` CSR.
+    ///
+    /// These allow you to efficiently track whether the floating point state
+    /// has been changed. See the privileged RISC-V spec for more information.
+    pub fn read_float_status(&self) -> u8 {
+        self.fstatus.get_bits()
+    }
     /// Write the `fflags` CSR.
     pub fn write_fflags(&mut self, new_value: u32) {
         let new_value = (F::read_csr(&self.fcsr) & !0b11111) | (new_value & 0b11111);
@@ -1767,6 +1847,10 @@ impl<F: FloatBits> Cpu<F> {
     /// Write the `fcsr` CSR.
     pub fn write_fcsr(&mut self, new_value: u32) {
         F::write_csr(&mut self.fcsr, new_value & 0b111_11111)
+    }
+    /// Write the `FS` bits for the `mstatus`/`sstatus` CSR.
+    pub fn write_float_status(&mut self, new_value: u8) {
+        self.fstatus.set_bits(new_value & 0b11);
     }
 }
 

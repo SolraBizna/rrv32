@@ -10,7 +10,7 @@ repository = "https://github.com/SolraBizna/rrv32"
 
 [dependencies]
 anyhow = "1.0.72"
-rustc_apfloat = {version = "0.2.0", optional = true}
+rustc_apfloat = { version = "0.2.0", optional = true }
 ieee-apsqrt = "0.1.1"
 
 [features]

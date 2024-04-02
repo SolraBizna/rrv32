@@ -20,7 +20,54 @@ pub const OVERFLOW_FLAG: u32 = 0b00100;
 pub const UNDERFLOW_FLAG: u32 = 0b00010;
 pub const INEXACT_FLAG: u32 = 0b00001;
 
-pub trait FloatBits: Default + Copy {
+pub trait FloatStatusTrait: Default + Clone {
+    fn set_bits(&mut self, bits: u8);
+    fn get_bits(&self) -> u8;
+    fn make_dirty(&mut self);
+    fn is_active(&self) -> bool;
+}
+
+impl FloatStatusTrait for () {
+    fn set_bits(&mut self, _bits: u8) {
+        // do nothing
+    }
+    fn get_bits(&self) -> u8 {
+        0b00
+    }
+    fn make_dirty(&mut self) {
+        // do nothing
+    }
+    fn is_active(&self) -> bool {
+        false
+    }
+}
+
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct FloatStatus(u8);
+
+impl FloatStatusTrait for FloatStatus {
+    fn set_bits(&mut self, bits: u8) {
+        self.0 = bits
+    }
+    fn get_bits(&self) -> u8 {
+        self.0
+    }
+    fn make_dirty(&mut self) {
+        self.0 = 0b11
+    }
+    fn is_active(&self) -> bool {
+        self.0 != 0
+    }
+}
+
+impl Default for FloatStatus {
+    fn default() -> FloatStatus {
+        FloatStatus(0b11)
+    }
+}
+
+pub trait FloatBits: Default + Copy + PartialEq + Eq {
     const SUPPORT_F: bool = false;
     const SUPPORT_D: bool = false;
     const SUPPORT_Q: bool = false;
@@ -43,6 +90,7 @@ pub trait FloatBits: Default + Copy {
         unreachable!()
     }
     type CsrType;
+    type StatusType: FloatStatusTrait;
     fn default_csr() -> Self::CsrType;
     fn read_csr(csr: &Self::CsrType) -> u32;
     fn write_csr(csr: &mut Self::CsrType, value: u32);
@@ -50,6 +98,7 @@ pub trait FloatBits: Default + Copy {
 
 impl FloatBits for () {
     type CsrType = ();
+    type StatusType = ();
     fn default_csr() {}
     fn read_csr(_: &()) -> u32 {
         0
@@ -66,6 +115,7 @@ impl FloatBits for u32 {
         self
     }
     type CsrType = u32;
+    type StatusType = FloatStatus;
     fn default_csr() -> u32 {
         DEFAULT_CSR
     }
@@ -93,6 +143,7 @@ impl FloatBits for u64 {
         self
     }
     type CsrType = u32;
+    type StatusType = FloatStatus;
     fn default_csr() -> u32 {
         DEFAULT_CSR
     }
@@ -130,6 +181,7 @@ impl FloatBits for u128 {
         self
     }
     type CsrType = u32;
+    type StatusType = FloatStatus;
     fn default_csr() -> u32 {
         DEFAULT_CSR
     }

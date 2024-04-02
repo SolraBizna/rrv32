@@ -88,7 +88,7 @@ Performance could be greatly improved with JIT, but I have already gone too far 
 
 # Legalese
 
-`rrv32` is copyright 2023, Solra Bizna, and licensed under either of:
+`rrv32` is copyright 2023 and 2024, Solra Bizna, and licensed under either of:
 
  * Apache License, Version 2.0
    ([LICENSE-APACHE](LICENSE-APACHE) or
