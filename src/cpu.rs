@@ -9,8 +9,77 @@ mod float;
 pub use float::FloatBits;
 use float::*;
 
+/// Register that always contains zero.
+pub const REGISTER_ZERO: u32 = 0;
+/// Register that contains the return address of the most recent call.
+pub const REGISTER_RA: u32 = 1;
+/// Register that serves as the stack pointer.
+pub const REGISTER_SP: u32 = 2;
+/// Register that serves as an anchor for accessing commonly-used global
+/// variables.
+pub const REGISTER_GP: u32 = 3;
+/// Register that serves as an anchor for accessing thread-local variables.
+pub const REGISTER_TP: u32 = 4;
+/// First register reserved for temporary variables. Caller-save.
+pub const REGISTER_T0: u32 = 5;
+/// Second register reserved for temporary variables. Caller-save.
+pub const REGISTER_T1: u32 = 6;
+/// Third register reserved for temporary variables. Caller-save.
+pub const REGISTER_T2: u32 = 7;
+/// First register reserved for longer-lived variables. Optionally
+/// used to store the frame pointer. Callee-save.
+pub const REGISTER_S0: u32 = 8;
+/// Second register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S1: u32 = 9;
+/// First register reserved for function arguments. Also used for the first
+/// return value. Caller-save.
+pub const REGISTER_A0: u32 = 10;
+/// Second register reserved for function arguments. Also used for the second
+/// return value. Caller-save.
+pub const REGISTER_A1: u32 = 11;
+/// Third register reserved for function arguments. Caller-save.
+pub const REGISTER_A2: u32 = 12;
+/// Fourth register reserved for function arguments. Caller-save.
+pub const REGISTER_A3: u32 = 13;
+/// Fifth register reserved for function arguments. Caller-save.
+pub const REGISTER_A4: u32 = 14;
+/// Sixth register reserved for function arguments. Caller-save.
+pub const REGISTER_A5: u32 = 15;
+/// Seventh register reserved for function arguments. Caller-save.
+pub const REGISTER_A6: u32 = 16;
+/// Eighth register reserved for function arguments. Caller-save.
+pub const REGISTER_A7: u32 = 17;
+/// Third register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S2: u32 = 18;
+/// Fourth register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S3: u32 = 19;
+/// Fifth register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S4: u32 = 20;
+/// Sixth register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S5: u32 = 21;
+/// Seventh register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S6: u32 = 22;
+/// Eighth register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S7: u32 = 23;
+/// Ninth register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S8: u32 = 24;
+/// Tenth register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S9: u32 = 25;
+/// Eleventh register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S10: u32 = 26;
+/// Twelfth register reserved for longer-lived variables, callee-save.
+pub const REGISTER_S11: u32 = 27;
+/// Fourth register reserved for temporary variables. Caller-save.
+pub const REGISTER_T3: u32 = 28;
+/// Fifth register reserved for temporary variables. Caller-save.
+pub const REGISTER_T4: u32 = 29;
+/// Sixth register reserved for temporary variables. Caller-save.
+pub const REGISTER_T5: u32 = 30;
+/// Seventh register reserved for temporary variables. Caller-save.
+pub const REGISTER_T6: u32 = 31;
+
 /// Exceptions that can occur during execution of an instruction. Values
-/// correspond to `mcause` values.
+/// correspond to `mcause` values from the RISC-V privileged spec.
 #[repr(i32)]
 #[derive(Debug)]
 #[allow(unused)]
@@ -41,10 +110,10 @@ pub struct Exception {
     /// instruction that was causing the PC to become misaligned, NOT the
     /// address it was jumping to)
     pub mepc: u32,
-    /// For `\*Fault` and `Misaligned\*` exceptions, this is the address whose
+    /// For `*Fault` and `Misaligned*` exceptions, this is the address whose
     /// access caused the exception. For `IllegalInstruction`, this is the
-    /// instruction word that was illegal. For all other exceptions, this is
-    /// 0.
+    /// actual instruction word that was deemed illegal. For all other
+    /// exceptions, always 0.
     pub mtval: u32,
 }
 
@@ -128,6 +197,7 @@ fn alu_op(alt: bool, op: u32, a: u32, b: u32) -> Result<u32, ExceptionCause> {
 }
 
 impl<F: FloatBits> Cpu<F> {
+    /// Creates a new CPU, a blank slate. All the registers are zeroed.
     pub fn new() -> Cpu<F> {
         Cpu {
             registers: [0; 32],
@@ -149,12 +219,17 @@ impl<F: FloatBits> Cpu<F> {
     /// supported. (It's out of spec because the unaligned instruction
     /// exception's `mepc` is supposed to indicate the address of the branch or
     /// jump that *would have* caused the trap, but if you `put_pc` a
-    /// misaligned value, it will contain the misaligned value instead.)
+    /// misaligned value, it will contain the misaligned value instead. This is
+    /// a condition that can only be created by a mistake in your code!)
     pub fn put_pc(&mut self, new_pc: u32) {
         self.registers[0] = new_pc & !1;
     }
     /// Get the value of a general purpose register, in the range 0-31.
-    /// Register 0 always returns 0.
+    /// Register 0 always returns 0. Index greater than or equal to 32 will
+    /// cause a PANIC!
+    ///
+    /// We provide symbolic constants named according to the standard RISC-V
+    /// ABI for convenience, see e.g. [`REGISTER_SP`].
     pub fn get_register(&self, index: u32) -> u32 {
         if (1..32).contains(&index) {
             self.registers[index as usize]
@@ -165,7 +240,11 @@ impl<F: FloatBits> Cpu<F> {
         }
     }
     /// Change the value of a general purpose register, in the range 0-31.
-    /// Setting register 0 is a no-op.
+    /// Setting register 0 is a no-op. Index greater than or equal to 32 will
+    /// cause a PANIC!
+    ///
+    /// We provide symbolic constants named according to the standard RISC-V
+    /// ABI for convenience, see e.g. [`REGISTER_SP`].
     pub fn put_register(&mut self, index: u32, value: u32) {
         if (1..32).contains(&index) {
             self.registers[index as usize] = value;
@@ -1370,15 +1449,15 @@ impl<F: FloatBits> Cpu<F> {
                 match rs3!() {
                     0b00000 => float_op!(T; o = a, b; {
                         o = a.add_r(b, round_mode!()); // FADD.{S,D,Q}
-                        env.account_float_binop(T::get_word_count());
+                        env.account_float_op(T::get_word_count());
                     }),
                     0b00001 => float_op!(T; o = a, b; {
                         o = a.sub_r(b, round_mode!()); // FSUB.{S,D,Q}
-                        env.account_float_binop(T::get_word_count());
+                        env.account_float_op(T::get_word_count());
                     }),
                     0b00010 => float_op!(T; o = a, b; {
                         o = a.mul_r(b, round_mode!()); // FMUL.{S,D,Q}
-                        env.account_float_binop(T::get_word_count());
+                        env.account_float_op(T::get_word_count());
                     }),
                     0b00011 => float_op!(T; o = a, b; {
                         // FDIV.{S,D,Q}
@@ -1528,7 +1607,7 @@ impl<F: FloatBits> Cpu<F> {
                                 if a.is_signaling() || b.is_signaling() {
                                     self.accrue_float_exceptions(INVALID_FLAG);
                                 }
-                                env.account_float_binop(T::get_word_count());
+                                env.account_float_op(T::get_word_count());
                             }),
                             0b001 => float_op!(T; o = a, b; {
                                 if a.is_nan() {
@@ -1544,7 +1623,7 @@ impl<F: FloatBits> Cpu<F> {
                                 if a.is_signaling() || b.is_signaling() {
                                     self.accrue_float_exceptions(INVALID_FLAG);
                                 }
-                                env.account_float_binop(T::get_word_count());
+                                env.account_float_op(T::get_word_count());
                             }),
                             _ => illegal!(),
                         }
@@ -1870,7 +1949,9 @@ impl<F: FloatBits> Cpu<F> {
     }
     /// Fetch, decode, and execute a single instruction. `Ok(())` means an
     /// instruction was retired successfully. `Err(...)` means an exception
-    /// occurred instead.
+    /// occurred instead. If the `Err` comes from an illegal instruction, you
+    /// can use the information in the returned `Exception` to decode and
+    /// possibly implement a non-core instruction yourself.
     pub fn step<Env: ExecutionEnvironment>(
         &mut self,
         env: &mut Env,
@@ -1882,6 +1963,11 @@ impl<F: FloatBits> Cpu<F> {
                 mtval,
             })
     }
+    /// Perform a read of a given CSR, as from a `CSRR` instruction.
+    ///
+    /// The `ExecutionEnvironment` must be provided so that we know if reading
+    /// CSRs is currently legal in the first place, and likely also to
+    /// implement the CSR as well.
     pub fn read_csr<Env: ExecutionEnvironment>(
         &mut self,
         env: &mut Env,
@@ -1912,6 +1998,11 @@ impl<F: FloatBits> Cpu<F> {
         }
         env.read_csr(csr_number)
     }
+    /// Perform a write to a given CSR, as from a `CSRW` instruction.
+    ///
+    /// The `ExecutionEnvironment` must be provided so that we know if reading
+    /// CSRs is currently legal in the first place, and likely also to
+    /// implement the CSR as well.
     pub fn write_csr<Env: ExecutionEnvironment>(
         &mut self,
         env: &mut Env,
@@ -1944,42 +2035,59 @@ impl<F: FloatBits> Cpu<F> {
         }
         env.write_csr(csr_number, new_value)
     }
-    /// Read the `fflags` CSR.
+    /// Read the `fflags` CSR, which contains all of the accumulated exception
+    /// flags for floating point operations.
     pub fn read_fflags(&self) -> u32 {
         (F::read_csr(&self.fcsr) & 0b11111) as u32
     }
-    /// Read the `frm` CSR.
+    /// Read the `frm` CSR, which contains the requested rounding mode for
+    /// floating point operations.
     pub fn read_frm(&self) -> u32 {
         ((F::read_csr(&self.fcsr) >> 5) & 0b111) as u32
     }
-    /// Read the `fcsr` CSR.
+    /// Read the `fcsr` CSR, which contains both the requested rounding mode
+    /// and the accumulated exceptions for floating point operations.
     pub fn read_fcsr(&self) -> u32 {
         F::read_csr(&self.fcsr) as u32
     }
     /// Read the `FS` bits for the `mstatus`/`sstatus` CSR.
     ///
     /// These allow you to efficiently track whether the floating point state
-    /// has been changed. See the privileged RISC-V spec for more information.
+    /// has been changed. See the privileged RISC-V spec or
+    /// [`write_float_status`](Self::write_float_status) for more information.
     pub fn read_float_status(&self) -> u8 {
         self.fstatus.get_bits()
     }
-    /// Write the `fflags` CSR.
+    /// Write the `fflags` CSR, changing the accumulated exception flags for
+    /// floating point operations.
     pub fn write_fflags(&mut self, new_value: u32) {
         let new_value =
             (F::read_csr(&self.fcsr) & !0b11111) | (new_value as u8 & 0b11111);
         F::write_csr(&mut self.fcsr, new_value)
     }
-    /// Write the `frm` CSR.
+    /// Write the `frm` CSR, changing the requested rounding mode for floating
+    /// point operations.
     pub fn write_frm(&mut self, new_value: u32) {
         let new_value = (F::read_csr(&self.fcsr) & !0b111_00000)
             | ((new_value as u8 & 0b111) << 5);
         F::write_csr(&mut self.fcsr, new_value)
     }
-    /// Write the `fcsr` CSR.
+    /// Write the `fcsr` CSR, changing both the requested rounding mode and the
+    /// accumulated exceptions for floating point operations.
     pub fn write_fcsr(&mut self, new_value: u32) {
         F::write_csr(&mut self.fcsr, new_value as u8)
     }
     /// Write the `FS` bits for the `mstatus`/`sstatus` CSR.
+    ///
+    /// - `0b00`: Floating point is (temporarily?) disabled
+    /// - `0b01`: "Initial"—floating point is in some software-defined pristine
+    ///   state
+    /// - `0b10`: "Clean"—floating point is whatever it was when the software
+    ///   wrote this value
+    /// - `0b11`: "Dirty"—some part of floating point state has changed since
+    ///   `0b01` or `0b10` was written
+    ///
+    /// See the RISC-V privileged spec for more information.
     pub fn write_float_status(&mut self, new_value: u8) {
         self.fstatus.set_bits(new_value & 0b11);
     }

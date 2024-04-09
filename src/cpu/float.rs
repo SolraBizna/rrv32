@@ -77,35 +77,68 @@ impl Default for FloatStatus {
     }
 }
 
+/// This trait is implemented by all four possible type parameters of
+/// [`Cpu<F>`](super::Cpu). You should not try to implement it yourself.
+/// Instead, you should use one of the four provided implementations.
+///
+/// - `()`: no floating point support
+/// - `u32`: 32-bit floating point support only
+/// - `u64`: 32- and 64-bit floating point support
+/// - `u128`: 32-, 64-, and 128-bit floating point support
+///
+/// Nothing inside this trait is considered part of the public-facing API.
+/// Non-compatible changes may be made even on patch releases. Depend on this
+/// trait's innards at your own risk.
 pub trait FloatBits: Default + Copy + PartialEq + Eq {
+    /// Must be equal to `std::mem::size_of::<Self>()`.
     const BYTES_PER_FLOAT: usize;
+    /// True if this `FloatBits` can fit a 32-bit float.
     const SUPPORT_F: bool = false;
+    /// True if this `FloatBits` can fit a 64-bit float.
     const SUPPORT_D: bool = false;
+    /// True if this `FloatBits` can fit a 128-bit float.
     const SUPPORT_Q: bool = false;
+    /// Cram a 32-bit float into this `FloatBits`.
     fn box_single(_input: u32) -> Self {
         unreachable!()
     }
+    /// Extract a 32-bit float from this `FloatBits`.
     fn unbox_single(self) -> u32 {
         unreachable!()
     }
+    /// Cram a 64-bit float into this `FloatBits`.
     fn box_double(_input: u64) -> Self {
         unreachable!()
     }
+    /// Extract a 64-bit float from this `FloatBits`.
     fn unbox_double(self) -> u64 {
         unreachable!()
     }
+    /// Cram a 128-bit float into this `FloatBits`.
     fn box_quad(_input: u128) -> Self {
         unreachable!()
     }
+    /// Extract a 128-bit float from this `FloatBits`.
     fn unbox_quad(self) -> u128 {
         unreachable!()
     }
+    /// Type that should be used to store the `fcsr` value; `u8` if floats are
+    /// supported, `()` if not.
     type CsrType;
+    /// Type that should be used to store the `fstatus` value; `u8` if floats
+    /// are supported, `()` if not.
     type StatusType: FloatStatusTrait;
+    /// Default value of `fcsr`.
     fn default_csr() -> Self::CsrType;
+    /// Extract the current value of `fcsr`.
     fn read_csr(csr: &Self::CsrType) -> u8;
+    /// Overwrite the current value of `fcsr`.
     fn write_csr(csr: &mut Self::CsrType, value: u8);
+    /// Marshal this `FloatBits` into `BYTES_PER_FLOAT` big-endian bytes.
+    /// (As an array of 16 bytes, currently.)
     fn to_bytes(&self) -> [u8; 16];
+    /// Recover this `FloatBits` from `BYTES_PER_FLOAT` big-endian bytes
+    /// previously acquired from calling [`to_bytes`](Self::to_bytes).
     fn from_bytes(b: &[u8]) -> Self;
 }
 
