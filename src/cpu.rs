@@ -2,59 +2,12 @@ use super::*;
 
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 
-#[cfg(feature = "float")]
+#[cfg(feature = "serde")]
+mod serde_support;
+
 mod float;
-#[cfg(not(feature = "float"))]
-/// Stub of the float module, to allow us to continue having that type
-/// parameter and the skeleton of that CSR.
-mod float {
-    pub trait FloatBits: Copy + Default {
-        const SUPPORT_F: bool = false;
-        const SUPPORT_D: bool = false;
-        const SUPPORT_Q: bool = false;
-        type CsrType;
-        type StatusType: FloatStatusTrait;
-        fn default_csr() -> Self::CsrType;
-        fn read_csr(_: &Self::CsrType) -> u32;
-        fn write_csr(_: &mut Self::CsrType, _: u32);
-    }
-    impl FloatBits for () {
-        type CsrType = ();
-        type StatusType = ();
-        fn default_csr() {}
-        fn read_csr(_: &()) -> u32 {
-            0
-        }
-        fn write_csr(_: &mut Self::CsrType, _: u32) {}
-    }
-    pub trait FloatStatusTrait: Default + Clone {
-        fn set_bits(&mut self, bits: u8);
-        fn get_bits(&self) -> u8;
-        fn make_dirty(&mut self);
-        fn is_active(&self) -> bool;
-    }
-    impl FloatStatusTrait for () {
-        fn set_bits(&mut self, _bits: u8) {
-            // do nothing
-        }
-        fn get_bits(&self) -> u8 {
-            0b00
-        }
-        fn make_dirty(&mut self) {
-            // do nothing
-        }
-        fn is_active(&self) -> bool {
-            false
-        }
-    }
-}
 pub use float::FloatBits;
 use float::*;
-#[cfg(feature = "float")]
-use rustc_apfloat::{
-    ieee::{Double, Quad, Single},
-    Float, FloatConvert, Status, StatusAnd,
-};
 
 /// Exceptions that can occur during execution of an instruction. Values
 /// correspond to `mcause` values.
@@ -254,10 +207,12 @@ impl<F: FloatBits> Cpu<F> {
             0b00011 => {
                 // SC.W
                 let src = self.get_register(rs2);
-                let result = match map_store(addr, env.store_reserved_word(addr, src))? {
-                    false => 1, // store failed!
-                    true => 0,  // store succeeded!
-                };
+                let result =
+                    match map_store(addr, env.store_reserved_word(addr, src))?
+                    {
+                        false => 1, // store failed!
+                        true => 0,  // store succeeded!
+                    };
                 self.put_register(rd, result);
                 return Ok(());
             }
@@ -289,7 +244,12 @@ impl<F: FloatBits> Cpu<F> {
                 // AMOMAXU.W
                 mem.max(reg)
             },
-            _ => return Err((ExceptionCause::IllegalInstruction, orig_instruction)),
+            _ => {
+                return Err((
+                    ExceptionCause::IllegalInstruction,
+                    orig_instruction,
+                ))
+            }
         };
         let src = self.get_register(rs2);
         // yes, map_store, because AMOs produce store exceptions even if it is
@@ -307,20 +267,30 @@ impl<F: FloatBits> Cpu<F> {
         env: &mut Env,
     ) -> Result<(), (ExceptionCause, u32)> {
         let this_pc = self.get_pc();
-        let orig_instruction = map_ifetch(this_pc, env.read_instruction(this_pc))?;
+        let orig_instruction =
+            map_ifetch(this_pc, env.read_instruction(this_pc))?;
         env.account_ifetch(this_pc);
         #[cfg(feature = "C")]
-        let (orig_instruction, instruction, mut next_pc) = if orig_instruction & 0b11 != 0b11 {
+        let (orig_instruction, instruction, mut next_pc) = if orig_instruction
+            & 0b11
+            != 0b11
+        {
             // It's a 16-bit instruction!
             if !Env::SUPPORT_C || !env.enable_c() {
-                return Err((ExceptionCause::IllegalInstruction, orig_instruction));
+                return Err((
+                    ExceptionCause::IllegalInstruction,
+                    orig_instruction,
+                ));
             }
             // Decode it
             // (see below comment about lexically scoped macros)
             let orig_instruction = orig_instruction & 0xFFFF;
             macro_rules! illegal {
                 () => {
-                    return Err((ExceptionCause::IllegalInstruction, orig_instruction))
+                    return Err((
+                        ExceptionCause::IllegalInstruction,
+                        orig_instruction,
+                    ))
                 };
             }
             macro_rules! extracted {
@@ -365,7 +335,10 @@ impl<F: FloatBits> Cpu<F> {
                         illegal!()
                     }
                     let rd = extract!((4..2)) + 8;
-                    self.put_register(rd, self.get_register(2).wrapping_add(offset));
+                    self.put_register(
+                        rd,
+                        self.get_register(2).wrapping_add(offset),
+                    );
                     env.account_generic_op();
                     self.put_pc(this_pc.wrapping_add(2));
                     return Ok(());
@@ -378,13 +351,15 @@ impl<F: FloatBits> Cpu<F> {
                 }
                 (0b010, 0b00) => {
                     // LW
-                    let offset = assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
+                    let offset =
+                        assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
                     let (rs1, rd) = extract!((9..7), (4..2));
                     assemble!(0b010_00000_0000011, (rs1+8)->15, (rd+8)->7, offset->20)
                 }
                 (0b011, 0b00) => {
                     // FLW
-                    let offset = assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
+                    let offset =
+                        assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
                     let (rs1, rd) = extract!((9..7), (4..2));
                     assemble!(0b010_00000_0000111, (rs1+8)->15, (rd+8)->7, offset->20)
                 }
@@ -396,13 +371,15 @@ impl<F: FloatBits> Cpu<F> {
                 }
                 (0b110, 0b00) => {
                     // SW
-                    let offset = assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
+                    let offset =
+                        assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
                     let (rs1, rs2) = extract!((9..7), (4..2));
                     assemble!(0b010_00000_0100011, (rs1+8)->15, (rs2+8)->20, (offset>>5)->25, (offset&0b11111)->7)
                 }
                 (0b111, 0b00) => {
                     // FSW
-                    let offset = assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
+                    let offset =
+                        assemble!(0, (12..10)->3, (6..6)->2, (5..5)->6);
                     let (rs1, rs2) = extract!((9..7), (4..2));
                     assemble!(0b010_00000_0100111, (rs1+8)->15, (rs2+8)->20, (offset>>5)->25, (offset&0b11111)->7)
                 }
@@ -410,7 +387,10 @@ impl<F: FloatBits> Cpu<F> {
                     // ADDI
                     let rd = extract!((11..7));
                     let imm = assemble!(0, (~12..12)->5, (6..2)->0);
-                    self.put_register(rd, self.get_register(rd).wrapping_add(imm));
+                    self.put_register(
+                        rd,
+                        self.get_register(rd).wrapping_add(imm),
+                    );
                     self.put_pc(self.get_pc().wrapping_add(2));
                     env.account_generic_op();
                     return Ok(());
@@ -437,9 +417,11 @@ impl<F: FloatBits> Cpu<F> {
                     let rd = extract!((11..7));
                     if rd == 2 {
                         // ADDI16SP
-                        let imm =
-                            assemble!(0, (~12..12)->9, (6..6)->4, (5..5)->6, (4..3)->7, (2..2)->5);
-                        self.put_register(2, self.get_register(2).wrapping_add(imm));
+                        let imm = assemble!(0, (~12..12)->9, (6..6)->4, (5..5)->6, (4..3)->7, (2..2)->5);
+                        self.put_register(
+                            2,
+                            self.get_register(2).wrapping_add(imm),
+                        );
                         self.put_pc(this_pc.wrapping_add(2));
                         env.account_generic_op();
                         return Ok(());
@@ -466,7 +448,10 @@ impl<F: FloatBits> Cpu<F> {
                                 illegal!()
                             }
                             let amt = extract!((6..2));
-                            self.put_register(rd, self.get_register(rd) >> amt as i32);
+                            self.put_register(
+                                rd,
+                                self.get_register(rd) >> amt as i32,
+                            );
                             self.put_pc(this_pc.wrapping_add(2));
                             env.account_generic_op();
                             return Ok(());
@@ -479,7 +464,8 @@ impl<F: FloatBits> Cpu<F> {
                             let amt = extract!((6..2));
                             self.put_register(
                                 rd,
-                                (self.get_register(rd) as i32 >> amt as i32) as u32,
+                                (self.get_register(rd) as i32 >> amt as i32)
+                                    as u32,
                             );
                             self.put_pc(this_pc.wrapping_add(2));
                             env.account_generic_op();
@@ -500,19 +486,23 @@ impl<F: FloatBits> Cpu<F> {
                             match op {
                                 0 => self.put_register(
                                     rd,
-                                    self.get_register(rd).wrapping_sub(self.get_register(rs2)),
+                                    self.get_register(rd)
+                                        .wrapping_sub(self.get_register(rs2)),
                                 ), // SUB
                                 1 => self.put_register(
                                     rd,
-                                    self.get_register(rd) ^ self.get_register(rs2),
+                                    self.get_register(rd)
+                                        ^ self.get_register(rs2),
                                 ), // XOR
                                 2 => self.put_register(
                                     rd,
-                                    self.get_register(rd) | self.get_register(rs2),
+                                    self.get_register(rd)
+                                        | self.get_register(rs2),
                                 ), // OR
                                 3 => self.put_register(
                                     rd,
-                                    self.get_register(rd) & self.get_register(rs2),
+                                    self.get_register(rd)
+                                        & self.get_register(rs2),
                                 ), // AND
                                 _ => illegal!(),
                             }
@@ -539,7 +529,10 @@ impl<F: FloatBits> Cpu<F> {
                         env.account_branch_op(true, offset & 0x80000000 == 0);
                     } else {
                         self.put_pc(this_pc.wrapping_add(2));
-                        env.account_branch_op(false, orig_instruction & (1 << 12) != 0);
+                        env.account_branch_op(
+                            false,
+                            orig_instruction & (1 << 12) != 0,
+                        );
                     }
                     return Ok(());
                 }
@@ -552,7 +545,10 @@ impl<F: FloatBits> Cpu<F> {
                         env.account_branch_op(true, offset & 0x80000000 == 0);
                     } else {
                         self.put_pc(this_pc.wrapping_add(2));
-                        env.account_branch_op(false, orig_instruction & (1 << 12) != 0);
+                        env.account_branch_op(
+                            false,
+                            orig_instruction & (1 << 12) != 0,
+                        );
                     }
                     return Ok(());
                 }
@@ -562,7 +558,10 @@ impl<F: FloatBits> Cpu<F> {
                         illegal!()
                     }
                     let (rd, shamt) = extract!((11..7), (6..2));
-                    self.put_register(rd, self.get_register(rd) << shamt as i32);
+                    self.put_register(
+                        rd,
+                        self.get_register(rd) << shamt as i32,
+                    );
                     self.put_pc(this_pc.wrapping_add(2));
                     env.account_generic_op();
                     return Ok(());
@@ -571,7 +570,8 @@ impl<F: FloatBits> Cpu<F> {
                     // FLDSP
                     let rs = 2;
                     let rd = extract!((11..7));
-                    let offset = assemble!(0, (12..12)->5, (6..5)->3, (4..2)->6);
+                    let offset =
+                        assemble!(0, (12..12)->5, (6..5)->3, (4..2)->6);
                     assemble!(0b011_00000_0000111, offset->20, rd->7, rs->15)
                 }
                 (0b010, 0b10) => {
@@ -581,18 +581,21 @@ impl<F: FloatBits> Cpu<F> {
                     if rd == 0 {
                         illegal!()
                     }
-                    let offset = assemble!(0, (12..12)->5, (6..4)->2, (3..2)->6);
+                    let offset =
+                        assemble!(0, (12..12)->5, (6..4)->2, (3..2)->6);
                     assemble!(0b010_00000_0000011, offset->20, rd->7, rs->15)
                 }
                 (0b011, 0b10) => {
                     // FLWSP
                     let rs = 2;
                     let rd = extract!((11..7));
-                    let offset = assemble!(0, (12..12)->5, (6..4)->2, (3..2)->6);
+                    let offset =
+                        assemble!(0, (12..12)->5, (6..4)->2, (3..2)->6);
                     assemble!(0b010_00000_0000111, offset->20, rd->7, rs->15)
                 }
                 (0b100, 0b10) => {
-                    let (twelve, rs1, rs2) = extract!((12..12), (11..7), (6..2));
+                    let (twelve, rs1, rs2) =
+                        extract!((12..12), (11..7), (6..2));
                     match (twelve, rs1, rs2) {
                         (0, rs1, 0) => {
                             // JR
@@ -678,7 +681,10 @@ impl<F: FloatBits> Cpu<F> {
         // scope!
         macro_rules! illegal {
             () => {
-                return Err((ExceptionCause::IllegalInstruction, orig_instruction))
+                return Err((
+                    ExceptionCause::IllegalInstruction,
+                    orig_instruction,
+                ))
             };
         }
         macro_rules! funct3 {
@@ -728,7 +734,10 @@ impl<F: FloatBits> Cpu<F> {
                 let imm_11 = (instruction >> 20) & 0b1;
                 let imm_19_12 = (instruction >> 12) & 0b11111111;
                 let imm_20 = (instruction as i32) >> 31;
-                (imm_10_1 << 1) | (imm_11 << 11) | (imm_19_12 << 12) | (imm_20 << 20) as u32
+                (imm_10_1 << 1)
+                    | (imm_11 << 11)
+                    | (imm_19_12 << 12)
+                    | (imm_20 << 20) as u32
             }};
         }
         macro_rules! imm_b {
@@ -737,7 +746,10 @@ impl<F: FloatBits> Cpu<F> {
                 let imm_10_5 = (instruction >> 25) & 0b111111;
                 let imm_11 = (instruction >> 7) & 0b1;
                 let imm_12 = ((instruction as i32) >> 31);
-                (imm_4_1 << 1) | (imm_10_5 << 5) | (imm_11 << 11) | (imm_12 << 12) as u32
+                (imm_4_1 << 1)
+                    | (imm_10_5 << 5)
+                    | (imm_11 << 11)
+                    | (imm_12 << 12) as u32
             }};
         }
         #[allow(unused_macros)]
@@ -843,7 +855,7 @@ impl<F: FloatBits> Cpu<F> {
                 let rm = if rm == 0b111 {
                     (F::read_csr(&self.fcsr) >> 5) & 0b111
                 } else {
-                    rm
+                    rm as u8
                 };
                 match rm {
                     0b000 => rustc_apfloat::Round::NearestTiesToEven,
@@ -1014,7 +1026,9 @@ impl<F: FloatBits> Cpu<F> {
             #[cfg(feature = "float")]
             0b00001 if !self.fstatus.is_active() => illegal!(),
             #[cfg(feature = "float")]
-            0b00001 if F::SUPPORT_F && env.enable_f() && funct3!() == 0b010 => {
+            0b00001
+                if F::SUPPORT_F && env.enable_f() && funct3!() == 0b010 =>
+            {
                 // FLW
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12!());
@@ -1023,27 +1037,44 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_memory_load(address);
             }
             #[cfg(feature = "float")]
-            0b00001 if F::SUPPORT_D && env.enable_d() && funct3!() == 0b011 => {
+            0b00001
+                if F::SUPPORT_D && env.enable_d() && funct3!() == 0b011 =>
+            {
                 // FLD
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12!());
-                let little_word = map_load(address, env.read_word(address, !0))?;
+                let little_word =
+                    map_load(address, env.read_word(address, !0))?;
                 // we are intentionally not adding 4 to the exception address!
-                let big_word = map_load(address, env.read_word(address.wrapping_add(4), !0))?;
+                let big_word = map_load(
+                    address,
+                    env.read_word(address.wrapping_add(4), !0),
+                )?;
                 let words = ((big_word as u64) << 32) | (little_word as u64);
                 frd!(F::box_double(words));
                 env.account_memory_double_load(address);
             }
             #[cfg(feature = "float")]
-            0b00001 if F::SUPPORT_Q && env.enable_q() && funct3!() == 0b100 => {
+            0b00001
+                if F::SUPPORT_Q && env.enable_q() && funct3!() == 0b100 =>
+            {
                 // FLQ?
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12!());
                 let words = [
                     map_load(address, env.read_word(address, !0))?,
-                    map_load(address, env.read_word(address.wrapping_add(4), !0))?,
-                    map_load(address, env.read_word(address.wrapping_add(8), !0))?,
-                    map_load(address, env.read_word(address.wrapping_add(12), !0))?,
+                    map_load(
+                        address,
+                        env.read_word(address.wrapping_add(4), !0),
+                    )?,
+                    map_load(
+                        address,
+                        env.read_word(address.wrapping_add(8), !0),
+                    )?,
+                    map_load(
+                        address,
+                        env.read_word(address.wrapping_add(12), !0),
+                    )?,
                 ];
                 let words = (words[3] as u128) << 96
                     | (words[2] as u128) << 64
@@ -1075,7 +1106,8 @@ impl<F: FloatBits> Cpu<F> {
                 let b = imm12!();
                 self.put_register(
                     rd!(),
-                    alu_op(alt, op, a, b).map_err(|x| (x, orig_instruction))?,
+                    alu_op(alt, op, a, b)
+                        .map_err(|x| (x, orig_instruction))?,
                 );
                 env.account_alu_op();
             }
@@ -1090,9 +1122,17 @@ impl<F: FloatBits> Cpu<F> {
                 let address = base.wrapping_add(imm12s!());
                 let word = self.get_register(rs2!());
                 match funct3!() {
-                    0b000 => map_store(address, env.write_byte(address, word as u8))?,
-                    0b001 => map_store(address, env.write_half(address, word as u16))?,
-                    0b010 => map_store(address, env.write_word(address, word, !0))?,
+                    0b000 => map_store(
+                        address,
+                        env.write_byte(address, word as u8),
+                    )?,
+                    0b001 => map_store(
+                        address,
+                        env.write_half(address, word as u16),
+                    )?,
+                    0b010 => {
+                        map_store(address, env.write_word(address, word, !0))?
+                    }
                     _ => illegal!(),
                 }
                 env.account_memory_store(address);
@@ -1100,7 +1140,9 @@ impl<F: FloatBits> Cpu<F> {
             #[cfg(feature = "float")]
             0b01001 if !self.fstatus.is_active() => illegal!(),
             #[cfg(feature = "float")]
-            0b01001 if F::SUPPORT_F && env.enable_f() && funct3!() == 0b010 => {
+            0b01001
+                if F::SUPPORT_F && env.enable_f() && funct3!() == 0b010 =>
+            {
                 // FSW
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12s!());
@@ -1109,7 +1151,9 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_memory_store(address);
             }
             #[cfg(feature = "float")]
-            0b01001 if F::SUPPORT_D && env.enable_d() && funct3!() == 0b011 => {
+            0b01001
+                if F::SUPPORT_D && env.enable_d() && funct3!() == 0b011 =>
+            {
                 // FSD
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12s!());
@@ -1118,12 +1162,18 @@ impl<F: FloatBits> Cpu<F> {
                 // we are intentionally not adding 4 to the exception address!
                 map_store(
                     address,
-                    env.write_word(address.wrapping_add(4), (words >> 32) as u32, !0),
+                    env.write_word(
+                        address.wrapping_add(4),
+                        (words >> 32) as u32,
+                        !0,
+                    ),
                 )?;
                 env.account_memory_double_store(address);
             }
             #[cfg(feature = "float")]
-            0b01001 if F::SUPPORT_Q && env.enable_q() && funct3!() == 0b100 => {
+            0b01001
+                if F::SUPPORT_Q && env.enable_q() && funct3!() == 0b100 =>
+            {
                 // FSQ?
                 let base = self.get_register(rs1!());
                 let address = base.wrapping_add(imm12s!());
@@ -1131,24 +1181,47 @@ impl<F: FloatBits> Cpu<F> {
                 map_store(address, env.write_word(address, words as u32, !0))?;
                 map_store(
                     address,
-                    env.write_word(address.wrapping_add(4), (words >> 32) as u32, !0),
+                    env.write_word(
+                        address.wrapping_add(4),
+                        (words >> 32) as u32,
+                        !0,
+                    ),
                 )?;
                 map_store(
                     address,
-                    env.write_word(address.wrapping_add(8), (words >> 64) as u32, !0),
+                    env.write_word(
+                        address.wrapping_add(8),
+                        (words >> 64) as u32,
+                        !0,
+                    ),
                 )?;
                 map_store(
                     address,
-                    env.write_word(address.wrapping_add(12), (words >> 96) as u32, !0),
+                    env.write_word(
+                        address.wrapping_add(12),
+                        (words >> 96) as u32,
+                        !0,
+                    ),
                 )?;
                 env.account_memory_double_store(address);
             }
-            0b01011 if Env::SUPPORT_A && env.enable_a() && funct3!() == 0b010 => {
+            0b01011
+                if Env::SUPPORT_A && env.enable_a() && funct3!() == 0b010 =>
+            {
                 // (AMO)
                 let amop = instruction >> 27;
                 let aq = instruction & (1 << 26) != 0;
                 let rl = instruction & (1 << 26) != 0;
-                self.perform_amo(env, amop, rd!(), rs1!(), rs2!(), aq, rl, orig_instruction)?;
+                self.perform_amo(
+                    env,
+                    amop,
+                    rd!(),
+                    rs1!(),
+                    rs2!(),
+                    aq,
+                    rl,
+                    orig_instruction,
+                )?;
                 env.account_amo_op();
             }
             0b01100 => {
@@ -1157,76 +1230,90 @@ impl<F: FloatBits> Cpu<F> {
                 let b = self.get_register(rs2!());
                 let result = match funct7!() {
                     0b0000000 => {
-                        let x =
-                            alu_op(false, funct3!(), a, b).map_err(|x| (x, orig_instruction))?;
+                        let x = alu_op(false, funct3!(), a, b)
+                            .map_err(|x| (x, orig_instruction))?;
                         env.account_alu_op();
                         x
                     }
                     0b0100000 => {
-                        let x = alu_op(true, funct3!(), a, b).map_err(|x| (x, orig_instruction))?;
+                        let x = alu_op(true, funct3!(), a, b)
+                            .map_err(|x| (x, orig_instruction))?;
                         env.account_alu_op();
                         x
                     }
-                    0b0000001 if Env::SUPPORT_M && env.enable_m() => match funct3!() {
-                        0b000 => {
-                            // MUL
-                            env.account_mul_op();
-                            a.wrapping_mul(b)
-                        }
-                        0b001 => {
-                            // MULH
-                            env.account_mul_op();
-                            ((a as i32 as u64).wrapping_mul(b as i32 as u64) >> 32) as u32
-                        }
-                        0b010 => {
-                            // MULHSU
-                            env.account_mul_op();
-                            ((a as i32 as u64).wrapping_mul(b as u64) >> 32) as u32
-                        }
-                        0b011 => {
-                            // MULHU
-                            env.account_mul_op();
-                            ((a as u64).wrapping_mul(b as u64) >> 32) as u32
-                        }
-                        0b100 => {
-                            // DIV
-                            env.account_div_op();
-                            if b == 0 {
-                                !0
-                            } else {
-                                ((a as i32) / (b as i32)) as u32
+                    0b0000001 if Env::SUPPORT_M && env.enable_m() => {
+                        match funct3!() {
+                            0b000 => {
+                                // MUL
+                                env.account_mul_op();
+                                a.wrapping_mul(b)
                             }
-                        }
-                        0b101 => {
-                            // DIVU
-                            env.account_div_op();
-                            if b == 0 {
-                                !0
-                            } else {
-                                a / b
+                            0b001 => {
+                                // MULH
+                                env.account_mul_op();
+                                ((a as i32 as u64)
+                                    .wrapping_mul(b as i32 as u64)
+                                    >> 32)
+                                    as u32
                             }
-                        }
-                        0b110 => {
-                            // REM
-                            env.account_div_op();
-                            if b == 0 {
-                                a
-                            } else {
-                                ((a as i32) % (b as i32)) as u32
+                            0b010 => {
+                                // MULHSU
+                                env.account_mul_op();
+                                ((a as i32 as u64).wrapping_mul(b as u64)
+                                    >> 32)
+                                    as u32
                             }
-                        }
-                        0b111 => {
-                            // REMU
-                            env.account_div_op();
-                            if b == 0 {
-                                a
-                            } else {
-                                a % b
+                            0b011 => {
+                                // MULHU
+                                env.account_mul_op();
+                                ((a as u64).wrapping_mul(b as u64) >> 32)
+                                    as u32
                             }
+                            0b100 => {
+                                // DIV
+                                env.account_div_op();
+                                if b == 0 {
+                                    !0
+                                } else {
+                                    ((a as i32) / (b as i32)) as u32
+                                }
+                            }
+                            0b101 => {
+                                // DIVU
+                                env.account_div_op();
+                                if b == 0 {
+                                    !0
+                                } else {
+                                    a / b
+                                }
+                            }
+                            0b110 => {
+                                // REM
+                                env.account_div_op();
+                                if b == 0 {
+                                    a
+                                } else {
+                                    ((a as i32) % (b as i32)) as u32
+                                }
+                            }
+                            0b111 => {
+                                // REMU
+                                env.account_div_op();
+                                if b == 0 {
+                                    a
+                                } else {
+                                    a % b
+                                }
+                            }
+                            _ => unreachable!(),
                         }
-                        _ => unreachable!(),
-                    },
-                    _ => return Err((ExceptionCause::IllegalInstruction, orig_instruction)),
+                    }
+                    _ => {
+                        return Err((
+                            ExceptionCause::IllegalInstruction,
+                            orig_instruction,
+                        ))
+                    }
                 };
                 self.put_register(rd!(), result);
             }
@@ -1324,35 +1411,53 @@ impl<F: FloatBits> Cpu<F> {
                             0b00 => {
                                 // single
                                 let a = F::unbox_single(a);
-                                let (result, iterations) = if env.use_accurate_single_sqrt() {
-                                    ieee_apsqrt::sqrt_accurate(a, round_mode!())
+                                let (result, iterations) = if env
+                                    .use_accurate_single_sqrt()
+                                {
+                                    ieee_apsqrt::sqrt_accurate(
+                                        a,
+                                        round_mode!(),
+                                    )
                                 } else {
                                     ieee_apsqrt::sqrt_fast(a, round_mode!())
                                 };
                                 env.account_sqrt(1, iterations);
-                                F::box_single(float::maybe_unstatus(self, result))
+                                F::box_single(float::maybe_unstatus(
+                                    self, result,
+                                ))
                             }
                             0b01 => {
                                 // double
                                 let a = F::unbox_double(a);
-                                let (result, iterations) = if env.use_accurate_single_sqrt() {
-                                    ieee_apsqrt::sqrt_accurate(a, round_mode!())
+                                let (result, iterations) = if env
+                                    .use_accurate_single_sqrt()
+                                {
+                                    ieee_apsqrt::sqrt_accurate(
+                                        a,
+                                        round_mode!(),
+                                    )
                                 } else {
                                     ieee_apsqrt::sqrt_fast(a, round_mode!())
                                 };
                                 env.account_sqrt(2, iterations);
-                                F::box_double(float::maybe_unstatus(self, result))
+                                F::box_double(float::maybe_unstatus(
+                                    self, result,
+                                ))
                             }
                             0b11 => {
                                 // quad
                                 let a = F::unbox_quad(a);
-                                let (result, iterations) = if env.use_accurate_single_sqrt() {
+                                let (result, iterations) = if env
+                                    .use_accurate_single_sqrt()
+                                {
                                     illegal!()
                                 } else {
                                     ieee_apsqrt::sqrt_fast(a, round_mode!())
                                 };
                                 env.account_sqrt(4, iterations);
-                                F::box_quad(float::maybe_unstatus(self, result))
+                                F::box_quad(float::maybe_unstatus(
+                                    self, result,
+                                ))
                             }
                             _ => illegal!(),
                         };
@@ -1376,7 +1481,8 @@ impl<F: FloatBits> Cpu<F> {
                                 let asign = a >> 31 != 0;
                                 let bsign = b >> 31 != 0;
                                 let osign = op(asign, bsign);
-                                let o = (a & (u32::MAX >> 1)) | ((osign as u32) << 31);
+                                let o = (a & (u32::MAX >> 1))
+                                    | ((osign as u32) << 31);
                                 frd!(F::box_single(o));
                             }
                             0b01 => {
@@ -1386,7 +1492,8 @@ impl<F: FloatBits> Cpu<F> {
                                 let asign = a >> 63 != 0;
                                 let bsign = b >> 63 != 0;
                                 let osign = op(asign, bsign);
-                                let o = (a & (u64::MAX >> 1)) | ((osign as u64) << 63);
+                                let o = (a & (u64::MAX >> 1))
+                                    | ((osign as u64) << 63);
                                 frd!(F::box_double(o));
                             }
                             0b11 => {
@@ -1396,7 +1503,8 @@ impl<F: FloatBits> Cpu<F> {
                                 let asign = a >> 127 != 0;
                                 let bsign = b >> 127 != 0;
                                 let osign = op(asign, bsign);
-                                let o = (a & (u128::MAX >> 1)) | ((osign as u128) << 127);
+                                let o = (a & (u128::MAX >> 1))
+                                    | ((osign as u128) << 127);
                                 frd!(F::box_quad(o));
                             }
                             _ => illegal!(),
@@ -1567,7 +1675,9 @@ impl<F: FloatBits> Cpu<F> {
                     0b11100 => match (rs2!(), funct3!()) {
                         (0b00000, 0b000) => {
                             // FMV.X.W
-                            let a = F::unbox_single(self.float_registers[rs1!() as usize]);
+                            let a = F::unbox_single(
+                                self.float_registers[rs1!() as usize],
+                            );
                             self.put_register(rd!(), a);
                             env.account_generic_op();
                         }
@@ -1618,17 +1728,28 @@ impl<F: FloatBits> Cpu<F> {
                     0b101 => (a as i32) >= (b as i32),
                     0b110 => a < b,
                     0b111 => a >= b,
-                    _ => return Err((ExceptionCause::IllegalInstruction, orig_instruction)),
+                    _ => {
+                        return Err((
+                            ExceptionCause::IllegalInstruction,
+                            orig_instruction,
+                        ))
+                    }
                 };
                 if should_branch {
                     next_pc = this_pc.wrapping_add(imm_b!());
                 }
-                env.account_branch_op(should_branch, instruction & (1 << 31) == 0);
+                env.account_branch_op(
+                    should_branch,
+                    instruction & (1 << 31) == 0,
+                );
             }
             0b11001 => {
                 // JALR
                 if funct3!() != 0 {
-                    return Err((ExceptionCause::IllegalInstruction, orig_instruction));
+                    return Err((
+                        ExceptionCause::IllegalInstruction,
+                        orig_instruction,
+                    ));
                 }
                 let offset = imm12!();
                 let base = self.get_register(rs1!());
@@ -1724,7 +1845,12 @@ impl<F: FloatBits> Cpu<F> {
                     illegal!()
                 }
             }
-            _ => return Err((ExceptionCause::IllegalInstruction, orig_instruction)),
+            _ => {
+                return Err((
+                    ExceptionCause::IllegalInstruction,
+                    orig_instruction,
+                ))
+            }
         }
         if (next_pc & 2 == 0) || (Env::SUPPORT_C && env.enable_c()) {
             // the lowest bit is supposed to be ignored, and it's hard to get a
@@ -1737,7 +1863,7 @@ impl<F: FloatBits> Cpu<F> {
     }
     /// Note that some floating point exceptions have occurred.
     #[allow(unused)]
-    fn accrue_float_exceptions(&mut self, exceptions: u32) {
+    fn accrue_float_exceptions(&mut self, exceptions: u8) {
         let fcsr = F::read_csr(&self.fcsr);
         let fcsr = fcsr | (exceptions & 0b11111);
         F::write_csr(&mut self.fcsr, fcsr);
@@ -1745,7 +1871,10 @@ impl<F: FloatBits> Cpu<F> {
     /// Fetch, decode, and execute a single instruction. `Ok(())` means an
     /// instruction was retired successfully. `Err(...)` means an exception
     /// occurred instead.
-    pub fn step<Env: ExecutionEnvironment>(&mut self, env: &mut Env) -> Result<(), Exception> {
+    pub fn step<Env: ExecutionEnvironment>(
+        &mut self,
+        env: &mut Env,
+    ) -> Result<(), Exception> {
         self.internal_step(env)
             .map_err(|(mcause, mtval)| Exception {
                 mcause,
@@ -1817,15 +1946,15 @@ impl<F: FloatBits> Cpu<F> {
     }
     /// Read the `fflags` CSR.
     pub fn read_fflags(&self) -> u32 {
-        F::read_csr(&self.fcsr) & 0b11111
+        (F::read_csr(&self.fcsr) & 0b11111) as u32
     }
     /// Read the `frm` CSR.
     pub fn read_frm(&self) -> u32 {
-        (F::read_csr(&self.fcsr) >> 5) & 0b111
+        ((F::read_csr(&self.fcsr) >> 5) & 0b111) as u32
     }
     /// Read the `fcsr` CSR.
     pub fn read_fcsr(&self) -> u32 {
-        F::read_csr(&self.fcsr)
+        F::read_csr(&self.fcsr) as u32
     }
     /// Read the `FS` bits for the `mstatus`/`sstatus` CSR.
     ///
@@ -1836,17 +1965,19 @@ impl<F: FloatBits> Cpu<F> {
     }
     /// Write the `fflags` CSR.
     pub fn write_fflags(&mut self, new_value: u32) {
-        let new_value = (F::read_csr(&self.fcsr) & !0b11111) | (new_value & 0b11111);
+        let new_value =
+            (F::read_csr(&self.fcsr) & !0b11111) | (new_value as u8 & 0b11111);
         F::write_csr(&mut self.fcsr, new_value)
     }
     /// Write the `frm` CSR.
     pub fn write_frm(&mut self, new_value: u32) {
-        let new_value = (F::read_csr(&self.fcsr) & !0b111_00000) | ((new_value & 0b111) << 5);
+        let new_value = (F::read_csr(&self.fcsr) & !0b111_00000)
+            | ((new_value as u8 & 0b111) << 5);
         F::write_csr(&mut self.fcsr, new_value)
     }
     /// Write the `fcsr` CSR.
     pub fn write_fcsr(&mut self, new_value: u32) {
-        F::write_csr(&mut self.fcsr, new_value & 0b111_11111)
+        F::write_csr(&mut self.fcsr, new_value as u8)
     }
     /// Write the `FS` bits for the `mstatus`/`sstatus` CSR.
     pub fn write_float_status(&mut self, new_value: u8) {
@@ -1866,8 +1997,12 @@ fn map_ifetch<T>(
     x: Result<T, MemoryAccessFailure>,
 ) -> Result<T, (ExceptionCause, u32)> {
     match x {
-        Err(MemoryAccessFailure::Unaligned) => Err((ExceptionCause::MisalignedPC, address)),
-        Err(MemoryAccessFailure::Fault) => Err((ExceptionCause::InstructionFault, address)),
+        Err(MemoryAccessFailure::Unaligned) => {
+            Err((ExceptionCause::MisalignedPC, address))
+        }
+        Err(MemoryAccessFailure::Fault) => {
+            Err((ExceptionCause::InstructionFault, address))
+        }
         Ok(x) => Ok(x),
     }
 }
@@ -1876,8 +2011,12 @@ fn map_load<T>(
     x: Result<T, MemoryAccessFailure>,
 ) -> Result<T, (ExceptionCause, u32)> {
     match x {
-        Err(MemoryAccessFailure::Unaligned) => Err((ExceptionCause::MisalignedLoad, address)),
-        Err(MemoryAccessFailure::Fault) => Err((ExceptionCause::LoadFault, address)),
+        Err(MemoryAccessFailure::Unaligned) => {
+            Err((ExceptionCause::MisalignedLoad, address))
+        }
+        Err(MemoryAccessFailure::Fault) => {
+            Err((ExceptionCause::LoadFault, address))
+        }
         Ok(x) => Ok(x),
     }
 }
@@ -1886,8 +2025,12 @@ fn map_store<T>(
     x: Result<T, MemoryAccessFailure>,
 ) -> Result<T, (ExceptionCause, u32)> {
     match x {
-        Err(MemoryAccessFailure::Unaligned) => Err((ExceptionCause::MisalignedStore, address)),
-        Err(MemoryAccessFailure::Fault) => Err((ExceptionCause::StoreFault, address)),
+        Err(MemoryAccessFailure::Unaligned) => {
+            Err((ExceptionCause::MisalignedStore, address))
+        }
+        Err(MemoryAccessFailure::Fault) => {
+            Err((ExceptionCause::StoreFault, address))
+        }
         Ok(x) => Ok(x),
     }
 }
