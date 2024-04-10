@@ -3,7 +3,27 @@
 <!-- This doc comment is automatically regenerated whenever README.md changes,
 and should not be edited manually. -->
 
-This is an RV32GCQ simulation crate. It implements all of the unprivileged behavior of the 32-bit RISC-V I, M, A, F, D, C, Q, Zifence, and Zicsr standards, and provides enough plumbing to implement all of the privileged standard. It has support for roughly accounting for and limiting execution time, which is useful for profiling and/or game design purposes.
+RISC-V is a powerful, elegant CPU instruction set architecture that is also an open standard. `rrv32` is a crate providing a software implementation of this architecture. You can use it to create a 32-bit RISC-V emulator. It is intended to form the core of the (yet unreleased) `tatsui` crate, which will provide a batteries-included drop-in computer system for use in computer games.
+
+`rrv32` supports all of RV32GCQ_Zicsr_Zifence. To unpack that one piece at a time:
+
+- RV32: 32-bit version of the RISC-V ISA. 32-bit address space, 32-bit general purpose registers, 32-bit ALU, 32-bit data bus.
+- G: Shorthand for IMAFD. The bare minimum subset of the architecture considered good enough for a "full computer" (something you would expect to be able to run Linux on, for example).
+  - I: Version of the basic instruction set that has 31 general purpose registers. (As opposed to E, which has only 15.)
+  - M: Multiplication and division instructions.
+  - A: Atomic memory operations.
+  - F: 32-bit floating point instructions.
+  - D: 64-bit floating point instructions.
+- C: Support for compressing certain common instructions into 16 bits, significantly reducing program size. (As opposed to every instruction taking up an entire 32 bits.)
+- Q: 128-bit floating point instructions.
+- Zicsr: Instructions for reading and writing hardware "control and status registers".
+- Zifence: An instruction that informs the CPU's instruction cache that some instructions stored in the instruction cache may no longer be valid (because the memory underlying them has changed).
+
+`rrv32` does not implement anything outside of the purview of these standards. In particular, it only implements components of the RISC-V *unprivileged* specification. While it does not contain any implementation of the RISC-V *privileged* specification, it is carefully designed such that your `ExecutionEnvironment` can provide a full implementation of the privileged specification—or any other paradigm you care to imagine that fills the same role.
+
+In keeping with its intended role as the core of a simulated computer in a video game, `rrv32` provides hooks for accounting for emulated CPU time. You can assign costs to each operation performed by the emulated CPU, so that the emulated computer can't starve the rest of the game of CPU time by performing a tight loop of expensive operations, for example. These hooks are *not* granular enough to perform cycle-accurate emulation of any but the most unsophisticated RISC-V hardware; they are, instead, designed to add as little overhead to the emulation as possible.
+
+For more information on RISC-V, including up-to-date versions of the privileged and unprivileged specifications, see the [RISC-V International® website](https://riscv.org/technical/specifications/).
 
 # Why?
 
@@ -32,7 +52,7 @@ Now all you must do is:
 
 Oh, and don't forget to have some kind of program loaded in the memory space created by your `ExecutionEnvironment`, or nothing interesting will happen. :)
 
-See `src/bin/ttybox.rs` for a very simple example. It emulates a particular terminal system which I often have my students implement in a logic simulator. (This is why it ingests programs in the form of Logisim memory dumps.)
+See [`src/bin/ttybox.rs`](https://github.com/SolraBizna/rrv32/blob/main/src/bin/ttybox.rs) for a very simple example. It emulates a particular terminal-based system which I often have my students implement in a logic simulator. (This is why it ingests programs in the form of Logisim memory dumps.)
 
 "Defining your memory space" is actually a huge amount of work and pain. If you want a much more batteries-included solution... when the `tatsui` crate is complete, I will link it here.
 
@@ -42,15 +62,17 @@ By default, the `C` and `float` features are enabled and the `serde` feature is 
 
 ## `C`
 
-If the `C` feature flag is enabled, `Cpu` can ingest 16-bit instructions as well as 32-bit ones. Even with this feature flag enabled, your `ExecutionEnvironment` can temporarily or permanently disable the `C` extension at its discretion. Leaving out this feature flag if you don't want `C` only saves compile time.
+Compiles in code relating to the `C` (compressed instructions) extension. You can disable `C` support without removing this feature flag, removing it just saves a little compile time in the case where you *know* you will never want the `C` extension.
 
 ## `float`
 
-If the `float` feature flag is enabled, `Cpu` can support the F, D, and Q extensions which respectively provide a 32-, 64-, and 128-bit floating point unit. Even with this feature flag enabled, your `ExecutionEnvironment` can temporarily or permanently disable the `F`/`D`/`Q` extensions at its discretion, and you can entirely omit the floating point state by using `Cpu<()>` instead of e.g. `Cpu<u64>`. Leaving out this feature if you don't want floats only saves compile time and a few dependencies.
+Compiles in code and dependencies relating to the floating point extensions (`FDQ`). You can disable float support without removing this feature flag, removing it just saves some compile time and avoids pulling in float-related dependencies.
 
 ## `serde`
 
-If the `serde` feature flag is enabled, `Cpu` implements serde's `Serialize` and `Deserialize` traits. This is the only practical way to save and restore a CPU's entire state. This feature flag is disabled by default because `serde` is a relatively hefty dependency; without it `rrv32` is quite lean.
+Implements [Serde](https://serde.rs)'s `Serialize` and `Deserialize` traits for `Cpu`. This is the only practical way to save and restore the emulated CPU's entire state. This feature flag is disabled by default because `serde` is a relatively hefty dependency; without it `rrv32` is quite lean.
+
+We took care to make the serialized CPU as compact as possible in any particular representation format.
 
 # RISC-V Extensions
 
@@ -75,11 +97,11 @@ F/D/Q support depends on the specialization of `Cpu`.
 - `Cpu<u64>`: D (double precision) and F support. CPU state is 388 or 392 bytes depending on your architecture.
 - `Cpu<u128>`: Q (quad precision) and D and F support. CPU state is 644, 648, or 656 bytes depending on your architecture.
 
-G requires D, so to actually simulate RV32G, make sure you specify `<u64>` on your `Cpu`.
+G requires D, so to actually simulate RV32G, make sure you specify `Cpu<u64>`.
 
 Double- and quad-precision floating point loads and stores are NOT ATOMIC. This is allowed by the standard, at least for 32-bit cores. They also only require 4-byte alignment. This simulator doesn't provide a way to fault on non-8-byte-aligned double loads and stores. If you need that behavior for some reason, sorry!
 
-All rounding modes and floating point exception flags should be fully handled. We use `rustc_apfloat` to do most of the heavy lifting here.
+All rounding modes and floating point exception flags are fully handled. We use `rustc_apfloat` to do most of the heavy lifting here. We avoid native floating point support because that would expose us to the subtle differences in floating point implementations for different architectures.
 
 ### Accuracy
 

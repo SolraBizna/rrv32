@@ -11,7 +11,10 @@ fn update_crate_comment() {
     let mut prefix = String::new();
     prefix += "/*!\n\n<!-- This doc comment is automatically regenerated \
     whenever README.md changes,\nand should not be edited manually. -->\n\n";
-    prefix += &readme;
+    prefix += &readme.replace(
+        "(src/bin/ttybox.rs)",
+        "(https://github.com/SolraBizna/rrv32/blob/main/src/bin/ttybox.rs)",
+    );
     prefix += "*/\n\n";
     let librs = prefix + &librs;
     let mut f = fs::File::create("src/lib.rs^").unwrap();
