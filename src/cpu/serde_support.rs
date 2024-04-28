@@ -13,10 +13,8 @@ impl<F: FloatBits> Serialize for Cpu<F> {
     {
         // Output (is_big_endian, bytes)
         let has_float = size_of::<F>() != 0;
-        let mut tuple = serializer.serialize_struct(
-            "SerializedCpu",
-            if has_float { 5 } else { 2 },
-        )?;
+        let mut tuple = serializer
+            .serialize_struct("Cpu", if has_float { 5 } else { 2 })?;
         let mut buf = [0; 512];
         let mut out_n = 0;
         for in_n in 0..32 {
@@ -53,25 +51,21 @@ impl<F: FloatBits> Serialize for Cpu<F> {
 // support and one which lacks it. And some formats might predicate on the
 // actual name of the struct. Thus... this.
 
-mod nofloat {
-    use super::*;
-    #[derive(Deserialize)]
-    pub struct SerializedCpu {
-        pub registers: Vec<u8>,
-        pub float_bytes: u8,
-    }
+#[derive(Deserialize)]
+#[serde(rename = "Cpu")]
+pub struct SerializedCpuNoFloat {
+    pub registers: Vec<u8>,
+    pub float_bytes: u8,
 }
 
-mod yesfloat {
-    use super::*;
-    #[derive(Deserialize)]
-    pub struct SerializedCpu {
-        pub registers: Vec<u8>,
-        pub float_bytes: u8,
-        pub fcsr: u8,
-        pub fstatus: u8,
-        pub float_registers: Vec<u8>,
-    }
+#[derive(Deserialize)]
+#[serde(rename = "Cpu")]
+pub struct SerializedCpuWithFloat {
+    pub registers: Vec<u8>,
+    pub float_bytes: u8,
+    pub fcsr: u8,
+    pub fstatus: u8,
+    pub float_registers: Vec<u8>,
 }
 
 impl<'de, F: FloatBits> Deserialize<'de> for Cpu<F> {
@@ -84,7 +78,7 @@ impl<'de, F: FloatBits> Deserialize<'de> for Cpu<F> {
         let (registers, float_bytes, fcsr, fstatus, float_registers);
         if std::mem::size_of::<F>() == 0 {
             let intermediate =
-                nofloat::SerializedCpu::deserialize(deserializer)?;
+                SerializedCpuNoFloat::deserialize(deserializer)?;
             registers = intermediate.registers;
             float_bytes = intermediate.float_bytes;
             fcsr = 0;
@@ -92,7 +86,7 @@ impl<'de, F: FloatBits> Deserialize<'de> for Cpu<F> {
             float_registers = vec![];
         } else {
             let intermediate =
-                yesfloat::SerializedCpu::deserialize(deserializer)?;
+                SerializedCpuWithFloat::deserialize(deserializer)?;
             registers = intermediate.registers;
             float_bytes = intermediate.float_bytes;
             fcsr = intermediate.fcsr;
