@@ -87,7 +87,7 @@ Full support. The burden of implementing reserved load/store is on your `Executi
 
 F/D/Q support depends on the specialization of `Cpu`.
 
-- `Cpu<()>`: Default. No floating point support. CPU state is 128 bytes. 
+- `Cpu<()>`: Default. No floating point support. CPU state is 128 bytes.
 - `Cpu<u32>`: F (single precision) support only. CPU state is 260 bytes.
 - `Cpu<u64>`: D (double precision) and F support. CPU state is 388 or 392 bytes depending on your architecture.
 - `Cpu<u128>`: Q (quad precision) and D and F support. CPU state is 644, 648, or 656 bytes depending on your architecture.
