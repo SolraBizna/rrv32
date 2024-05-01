@@ -36,7 +36,11 @@ impl Default for BoxSpace {
 }
 
 impl ExecutionEnvironment for BoxSpace {
-    fn read_word(&mut self, address: u32, _mask: u32) -> Result<u32, MemoryAccessFailure> {
+    fn read_word(
+        &mut self,
+        address: u32,
+        _mask: u32,
+    ) -> Result<u32, MemoryAccessFailure> {
         if address & 3 != 0 {
             return Err(MemoryAccessFailure::Unaligned);
         }
@@ -73,7 +77,10 @@ impl ExecutionEnvironment for BoxSpace {
         }
         Ok(())
     }
-    fn load_reserved_word(&mut self, address: u32) -> Result<u32, MemoryAccessFailure> {
+    fn load_reserved_word(
+        &mut self,
+        address: u32,
+    ) -> Result<u32, MemoryAccessFailure> {
         if address & 3 != 0 {
             return Err(MemoryAccessFailure::Unaligned);
         }
@@ -118,7 +125,10 @@ fn main() {
 mod ipl {
     use anyhow::{anyhow, Context};
     use std::io::BufRead;
-    pub fn initial_program_load<R: BufRead>(buf: &mut [u32], reader: R) -> anyhow::Result<()> {
+    pub fn initial_program_load<R: BufRead>(
+        buf: &mut [u32],
+        reader: R,
+    ) -> anyhow::Result<()> {
         let mut lines = reader.lines();
         match lines.next() {
             None => return Err(anyhow!("unexpected eof")),
@@ -135,9 +145,12 @@ mod ipl {
             let line = line.trim();
             let (count, value) = match line.split_once('*') {
                 None => (1, line),
-                Some((count, value)) => (count.parse().context("unable to parse count")?, value),
+                Some((count, value)) => {
+                    (count.parse().context("unable to parse count")?, value)
+                }
             };
-            let value = u32::from_str_radix(value, 16).context("unable to parse value")?;
+            let value = u32::from_str_radix(value, 16)
+                .context("unable to parse value")?;
             for _ in 0..count {
                 buf[out_index] = value;
                 out_index += 1;

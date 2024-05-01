@@ -6,10 +6,14 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
 };
 
-use rrv32::{ExceptionCause, ExecutionEnvironment, FloatBits, MemoryAccessFailure};
+use rrv32::{
+    ExceptionCause, ExecutionEnvironment, FloatBits, MemoryAccessFailure,
+};
 
 fn print_usage_and_exit(fatal: bool) {
-    println!("Usage: riscof-dut --isa=imafdq --signature-path=PATH --exe-path=PATH");
+    println!(
+        "Usage: riscof-dut --isa=imafdq --signature-path=PATH --exe-path=PATH"
+    );
     std::process::exit(if fatal { 1 } else { 0 })
 }
 
@@ -44,7 +48,10 @@ fn parse_args() -> (String, String, String) {
             }
         } else {
             match arg.as_str() {
-                "--isa" | "--signature-path" | "--exe-path" | "--signature-granularity" => {
+                "--isa"
+                | "--signature-path"
+                | "--exe-path"
+                | "--signature-granularity" => {
                     println!("{arg} requires an equals sign and an argument");
                     print_usage_and_exit(true);
                 }
@@ -198,7 +205,8 @@ fn read_elf_section_header(file: &mut File) -> ElfSectionHeader {
     let sh_size = u32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]);
     let sh_link = u32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
     let sh_info = u32::from_le_bytes([buf[28], buf[29], buf[30], buf[31]]);
-    let sh_addralign = u32::from_le_bytes([buf[32], buf[33], buf[34], buf[35]]);
+    let sh_addralign =
+        u32::from_le_bytes([buf[32], buf[33], buf[34], buf[35]]);
     let sh_entsize = u32::from_le_bytes([buf[36], buf[37], buf[38], buf[39]]);
     ElfSectionHeader {
         sh_name,
@@ -328,7 +336,9 @@ fn load_elf(path: &str) -> LoadedElf {
     let mut strtab_header = None;
     for section_number in 0..header.e_shnum {
         f.seek(SeekFrom::Start(
-            (header.e_shoff + header.e_shentsize as u32 * section_number as u32) as u64,
+            (header.e_shoff
+                + header.e_shentsize as u32 * section_number as u32)
+                as u64,
         ))
         .unwrap();
         let section_header = read_elf_section_header(&mut f);
@@ -356,7 +366,9 @@ fn load_elf(path: &str) -> LoadedElf {
     let mut symbol_table = HashMap::new();
     f.seek(SeekFrom::Start(symtab_header.sh_offset as u64))
         .unwrap();
-    for _ in (0..symtab_header.sh_size).step_by(symtab_header.sh_entsize as usize) {
+    for _ in
+        (0..symtab_header.sh_size).step_by(symtab_header.sh_entsize as usize)
+    {
         let symbol = read_elf_symbol(&mut f);
         let symbol_name = &strtab[symbol.st_name as usize
             ..symbol.st_name as usize
@@ -402,11 +414,17 @@ impl<const A: bool, const M: bool, const C: bool> Elfo<A, M, C> {
     }
 }
 
-impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment for Elfo<A, M, C> {
+impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment
+    for Elfo<A, M, C>
+{
     const SUPPORT_A: bool = A;
     const SUPPORT_M: bool = M;
     const SUPPORT_C: bool = C;
-    fn read_word(&mut self, address: u32, _mask: u32) -> Result<u32, rrv32::MemoryAccessFailure> {
+    fn read_word(
+        &mut self,
+        address: u32,
+        _mask: u32,
+    ) -> Result<u32, rrv32::MemoryAccessFailure> {
         if address % 4 != 0 {
             return Err(MemoryAccessFailure::Unaligned);
         }
@@ -447,7 +465,10 @@ impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment for Elfo<
         }
         Err(MemoryAccessFailure::AccessFault)
     }
-    fn load_reserved_word(&mut self, address: u32) -> Result<u32, rrv32::MemoryAccessFailure> {
+    fn load_reserved_word(
+        &mut self,
+        address: u32,
+    ) -> Result<u32, rrv32::MemoryAccessFailure> {
         if address % 4 != 0 {
             return Err(MemoryAccessFailure::Unaligned);
         }
@@ -477,7 +498,11 @@ impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment for Elfo<
             Err(ExceptionCause::IllegalInstruction)
         }
     }
-    fn write_csr(&mut self, csr_number: u32, _: u32) -> Result<(), ExceptionCause> {
+    fn write_csr(
+        &mut self,
+        csr_number: u32,
+        _: u32,
+    ) -> Result<(), ExceptionCause> {
         if csr_number == 0x300 {
             Ok(())
         } else {
@@ -510,7 +535,9 @@ fn run_inner<F: FloatBits, const A: bool, const M: bool, const C: bool>(
                 }
             }
             None => (),
-            Some(tohost) => panic!("Unknown tohost value: {tohost}/0x{tohost:X}"),
+            Some(tohost) => {
+                panic!("Unknown tohost value: {tohost}/0x{tohost:X}")
+            }
         }
     }
     let sig_begin = *elfo
@@ -541,13 +568,27 @@ fn run_outer<F: FloatBits>(
         (false, false, false) => {
             run_inner::<F, false, false, false>(signature_path, Elfo::new(elf))
         }
-        (true, false, false) => run_inner::<F, true, false, false>(signature_path, Elfo::new(elf)),
-        (false, true, false) => run_inner::<F, false, true, false>(signature_path, Elfo::new(elf)),
-        (true, true, false) => run_inner::<F, true, true, false>(signature_path, Elfo::new(elf)),
-        (false, false, true) => run_inner::<F, false, false, true>(signature_path, Elfo::new(elf)),
-        (true, false, true) => run_inner::<F, true, false, true>(signature_path, Elfo::new(elf)),
-        (false, true, true) => run_inner::<F, false, true, true>(signature_path, Elfo::new(elf)),
-        (true, true, true) => run_inner::<F, true, true, true>(signature_path, Elfo::new(elf)),
+        (true, false, false) => {
+            run_inner::<F, true, false, false>(signature_path, Elfo::new(elf))
+        }
+        (false, true, false) => {
+            run_inner::<F, false, true, false>(signature_path, Elfo::new(elf))
+        }
+        (true, true, false) => {
+            run_inner::<F, true, true, false>(signature_path, Elfo::new(elf))
+        }
+        (false, false, true) => {
+            run_inner::<F, false, false, true>(signature_path, Elfo::new(elf))
+        }
+        (true, false, true) => {
+            run_inner::<F, true, false, true>(signature_path, Elfo::new(elf))
+        }
+        (false, true, true) => {
+            run_inner::<F, false, true, true>(signature_path, Elfo::new(elf))
+        }
+        (true, true, true) => {
+            run_inner::<F, true, true, true>(signature_path, Elfo::new(elf))
+        }
     }
 }
 
@@ -611,9 +652,33 @@ fn main() {
     let support_c = isa[4..].contains('c');
     let elf = load_elf(&exe_path);
     match float_isa {
-        FloatISA::None => run_outer::<()>(&signature_path, support_a, support_m, support_c, elf),
-        FloatISA::F => run_outer::<u32>(&signature_path, support_a, support_m, support_c, elf),
-        FloatISA::D => run_outer::<u64>(&signature_path, support_a, support_m, support_c, elf),
-        FloatISA::Q => run_outer::<u128>(&signature_path, support_a, support_m, support_c, elf),
+        FloatISA::None => run_outer::<()>(
+            &signature_path,
+            support_a,
+            support_m,
+            support_c,
+            elf,
+        ),
+        FloatISA::F => run_outer::<u32>(
+            &signature_path,
+            support_a,
+            support_m,
+            support_c,
+            elf,
+        ),
+        FloatISA::D => run_outer::<u64>(
+            &signature_path,
+            support_a,
+            support_m,
+            support_c,
+            elf,
+        ),
+        FloatISA::Q => run_outer::<u128>(
+            &signature_path,
+            support_a,
+            support_m,
+            support_c,
+            elf,
+        ),
     }
 }
