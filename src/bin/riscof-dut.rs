@@ -415,11 +415,11 @@ impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment for Elfo<
         } else if address >= 0x80000000 {
             let word_offset = ((address - 0x80000000) / 4) as usize;
             if word_offset >= self.ram.len() {
-                return Err(MemoryAccessFailure::Fault);
+                return Err(MemoryAccessFailure::AccessFault);
             }
             return Ok(self.ram[word_offset]);
         }
-        Err(MemoryAccessFailure::Fault)
+        Err(MemoryAccessFailure::AccessFault)
     }
     fn write_word(
         &mut self,
@@ -439,13 +439,13 @@ impl<const A: bool, const M: bool, const C: bool> ExecutionEnvironment for Elfo<
         } else if address >= 0x80000000 {
             let word_offset = ((address - 0x80000000) / 4) as usize;
             if word_offset >= self.ram.len() {
-                return Err(MemoryAccessFailure::Fault);
+                return Err(MemoryAccessFailure::AccessFault);
             }
             self.ram[word_offset] &= !mask;
             self.ram[word_offset] |= data & mask;
             return Ok(());
         }
-        Err(MemoryAccessFailure::Fault)
+        Err(MemoryAccessFailure::AccessFault)
     }
     fn load_reserved_word(&mut self, address: u32) -> Result<u32, rrv32::MemoryAccessFailure> {
         if address % 4 != 0 {

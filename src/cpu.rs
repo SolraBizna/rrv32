@@ -85,13 +85,13 @@ pub const REGISTER_T6: u32 = 31;
 #[allow(unused)]
 pub enum ExceptionCause {
     MisalignedPC = 0,
-    InstructionFault = 1,
+    InstructionAccessFault = 1,
     IllegalInstruction = 2,
     Breakpoint = 3,
     MisalignedLoad = 4,
-    LoadFault = 5,
+    LoadAccessFault = 5,
     MisalignedStore = 6,
-    StoreFault = 7,
+    StoreAccessFault = 7,
     EcallFromUmode = 8,
     EcallFromSmode = 9,
     EcallFromMmode = 11,
@@ -2108,8 +2108,11 @@ fn map_ifetch<T>(
         Err(MemoryAccessFailure::Unaligned) => {
             Err((ExceptionCause::MisalignedPC, address))
         }
-        Err(MemoryAccessFailure::Fault) => {
-            Err((ExceptionCause::InstructionFault, address))
+        Err(MemoryAccessFailure::AccessFault) => {
+            Err((ExceptionCause::InstructionAccessFault, address))
+        }
+        Err(MemoryAccessFailure::PageFault) => {
+            Err((ExceptionCause::InstructionPageFault, address))
         }
         Ok(x) => Ok(x),
     }
@@ -2122,8 +2125,11 @@ fn map_load<T>(
         Err(MemoryAccessFailure::Unaligned) => {
             Err((ExceptionCause::MisalignedLoad, address))
         }
-        Err(MemoryAccessFailure::Fault) => {
-            Err((ExceptionCause::LoadFault, address))
+        Err(MemoryAccessFailure::AccessFault) => {
+            Err((ExceptionCause::LoadAccessFault, address))
+        }
+        Err(MemoryAccessFailure::PageFault) => {
+            Err((ExceptionCause::LoadPageFault, address))
         }
         Ok(x) => Ok(x),
     }
@@ -2136,8 +2142,11 @@ fn map_store<T>(
         Err(MemoryAccessFailure::Unaligned) => {
             Err((ExceptionCause::MisalignedStore, address))
         }
-        Err(MemoryAccessFailure::Fault) => {
-            Err((ExceptionCause::StoreFault, address))
+        Err(MemoryAccessFailure::AccessFault) => {
+            Err((ExceptionCause::StoreAccessFault, address))
+        }
+        Err(MemoryAccessFailure::PageFault) => {
+            Err((ExceptionCause::StorePageFault, address))
         }
         Ok(x) => Ok(x),
     }

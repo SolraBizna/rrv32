@@ -47,7 +47,7 @@ impl ExecutionEnvironment for BoxSpace {
             std::io::stdin().read_exact(&mut buf).expect("EOF");
             buf[0] as u32
         } else {
-            return Err(MemoryAccessFailure::Fault);
+            return Err(MemoryAccessFailure::AccessFault);
         };
         Ok(ret)
     }
@@ -69,7 +69,7 @@ impl ExecutionEnvironment for BoxSpace {
         } else if address == 0xFFFFFFFC {
             std::io::stdout().write_all(&[data as u8]).unwrap();
         } else {
-            return Err(MemoryAccessFailure::Fault);
+            return Err(MemoryAccessFailure::AccessFault);
         }
         Ok(())
     }

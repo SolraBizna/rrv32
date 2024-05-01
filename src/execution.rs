@@ -7,9 +7,10 @@ pub enum MemoryAccessFailure {
     /// The address was misaligned, and this system doesn't support misaligned
     /// access.
     Unaligned = 0,
-    /// Catch-all for all other kinds of failure, including bus errors, page
-    /// faults, and access violations.
-    Fault = 1,
+    /// Physical-layer failures: bus errors, PMP violations.
+    AccessFault = 1,
+    /// Virtual-layer failures.
+    PageFault = 2,
 }
 
 /// Everything *outside* of the core CPU: memory space, CSRs, extension state,
