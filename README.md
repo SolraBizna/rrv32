@@ -47,7 +47,7 @@ Now all you must do is:
 
 Oh, and don't forget to have some kind of program loaded in the memory space created by your `ExecutionEnvironment`, or nothing interesting will happen. :)
 
-See [`src/bin/ttybox.rs`](src/bin/ttybox.rs) for a very simple example. It emulates a particular terminal-based system which I often have my students implement in a logic simulator. (This is why it ingests programs in the form of Logisim memory dumps.)
+See `src/bin/ttybox.rs` for a very simple example. It emulates a particular terminal-based system which I often have my students implement in a logic simulator. (This is why it ingests programs in the form of Logisim memory dumps.)
 
 "Defining your memory space" is actually a huge amount of work and pain. If you want a much more batteries-included solution... when the `tatsui` crate is complete, I will link it here.
 
