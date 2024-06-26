@@ -13,6 +13,47 @@ pub enum MemoryAccessFailure {
     PageFault = 2,
 }
 
+/// Flags relating to the status of extension registers. (e.g. FS/VS/XS of
+/// mstatus)
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ExtensionStatus {
+    /// The extension is disabled.
+    Disabled = 0,
+    /// The registers are in some OS-defined "initial state". (Set by OS.)
+    Initialized = 1,
+    /// The registers are not in the "initial state", but they haven't
+    /// changed since the last context switch. (Set by OS.)
+    Clean = 2,
+    /// The registers have changed since the last context switch. (Set by
+    /// hardware.)
+    Dirty = 3,
+}
+
+impl ExtensionStatus {
+    /// Convert the enum to raw FS/VS/XS bits. (0b00 = disabled, 0b01 =
+    /// initialized, 0b10 = clean, 0b11 = dirty)
+    pub fn to_bits(&self) -> u32 {
+        match self {
+            ExtensionStatus::Disabled => 0,
+            ExtensionStatus::Initialized => 1,
+            ExtensionStatus::Clean => 2,
+            ExtensionStatus::Dirty => 3,
+        }
+    }
+    /// Convert from raw FS/VS/XS bits to an enum value. Bits other than the
+    /// two low order bits will be ignored.
+    pub fn from_bits(bits: u32) -> ExtensionStatus {
+        match bits & 3 {
+            0 => ExtensionStatus::Disabled,
+            1 => ExtensionStatus::Initialized,
+            2 => ExtensionStatus::Clean,
+            3 => ExtensionStatus::Dirty,
+            _ => unreachable!(),
+        }
+    }
+}
+
 /// Everything *outside* of the core CPU: memory space, CSRs, extension state,
 /// cycle accounting. `rrv32` provides the core CPU, you provide one of these,
 /// together they make a whole system.
@@ -291,6 +332,17 @@ pub trait ExecutionEnvironment {
     ) -> Result<(), ExceptionCause> {
         Err(ExceptionCause::IllegalInstruction)
     }
+    /// Return the status of the floating point registers. The default
+    /// implementation just returns Dirty all the time, which makes context
+    /// switches potentially a little less efficient in an OS environment.
+    fn read_fs(&self) -> ExtensionStatus {
+        ExtensionStatus::Dirty
+    }
+    /// Set the status of the floating point registers. The OS may set the
+    /// status to Disabled, Initialized, or Clean during a context switch. The
+    /// hardware may set the status to Dirty in response to a floating point
+    /// operation.
+    fn write_fs(&mut self, _status: ExtensionStatus) {}
     /// Return true if we should use the slow, exact square root for single
     /// precision at the moment, false to use the fast, not completely exact
     /// square root. Default is true (slow, exact).

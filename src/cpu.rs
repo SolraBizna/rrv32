@@ -132,7 +132,6 @@ pub struct Cpu<F: FloatBits = ()> {
     registers: [u32; 32], // pc is stored where x0 would be
     float_registers: [F; 32],
     fcsr: F::CsrType,
-    fstatus: F::StatusType,
 }
 
 fn alu_op(alt: bool, op: u32, a: u32, b: u32) -> Result<u32, ExceptionCause> {
@@ -203,7 +202,6 @@ impl<F: FloatBits> Cpu<F> {
             registers: [0; 32],
             float_registers: Default::default(),
             fcsr: F::default_csr(),
-            fstatus: Default::default(),
         }
     }
     /// Return the current value of the PC, i.e. the instruction that will be
@@ -874,7 +872,7 @@ impl<F: FloatBits> Cpu<F> {
                 let rd = rd!() as usize;
                 let value = $value;
                 if self.float_registers[rd] != value {
-                    self.fstatus.set_bits(0b11);
+                    env.write_fs(ExtensionStatus::Dirty);
                     self.float_registers[rd!() as usize] = value;
                 }
             };
@@ -1103,7 +1101,9 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_memory_load(address);
             }
             #[cfg(feature = "float")]
-            0b00001 if !self.fstatus.is_active() => illegal!(),
+            0b00001 if env.read_fs() == ExtensionStatus::Disabled => {
+                illegal!()
+            }
             #[cfg(feature = "float")]
             0b00001
                 if F::SUPPORT_F && env.enable_f() && funct3!() == 0b010 =>
@@ -1217,7 +1217,9 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_memory_store(address);
             }
             #[cfg(feature = "float")]
-            0b01001 if !self.fstatus.is_active() => illegal!(),
+            0b01001 if env.read_fs() == ExtensionStatus::Disabled => {
+                illegal!()
+            }
             #[cfg(feature = "float")]
             0b01001
                 if F::SUPPORT_F && env.enable_f() && funct3!() == 0b010 =>
@@ -1402,7 +1404,9 @@ impl<F: FloatBits> Cpu<F> {
                 env.account_generic_op();
             }
             #[cfg(feature = "float")]
-            0b10000 if !self.fstatus.is_active() => illegal!(),
+            0b10000 if env.read_fs() == ExtensionStatus::Disabled => {
+                illegal!()
+            }
             #[cfg(feature = "float")]
             0b10000 => {
                 // FMADD.{S,D,Q}
@@ -1412,7 +1416,9 @@ impl<F: FloatBits> Cpu<F> {
                 });
             }
             #[cfg(feature = "float")]
-            0b10001 if !self.fstatus.is_active() => illegal!(),
+            0b10001 if env.read_fs() == ExtensionStatus::Disabled => {
+                illegal!()
+            }
             #[cfg(feature = "float")]
             0b10001 => {
                 // FMSUB.{S,D,Q}
@@ -1422,7 +1428,9 @@ impl<F: FloatBits> Cpu<F> {
                 });
             }
             #[cfg(feature = "float")]
-            0b10010 if !self.fstatus.is_active() => illegal!(),
+            0b10010 if env.read_fs() == ExtensionStatus::Disabled => {
+                illegal!()
+            }
             #[cfg(feature = "float")]
             0b10010 => {
                 // FNMADD.{S,D,Q}
@@ -1432,7 +1440,9 @@ impl<F: FloatBits> Cpu<F> {
                 });
             }
             #[cfg(feature = "float")]
-            0b10011 if !self.fstatus.is_active() => illegal!(),
+            0b10011 if env.read_fs() == ExtensionStatus::Disabled => {
+                illegal!()
+            }
             #[cfg(feature = "float")]
             0b10011 => {
                 // FNMSUB.{S,D,Q}
@@ -1442,7 +1452,9 @@ impl<F: FloatBits> Cpu<F> {
                 });
             }
             #[cfg(feature = "float")]
-            0b10100 if !self.fstatus.is_active() => illegal!(),
+            0b10100 if env.read_fs() == ExtensionStatus::Disabled => {
+                illegal!()
+            }
             #[cfg(feature = "float")]
             0b10100 => {
                 // most float ops
@@ -1976,19 +1988,19 @@ impl<F: FloatBits> Cpu<F> {
         if F::SUPPORT_F && env.enable_f() {
             match csr_number {
                 0x001 => {
-                    if !self.fstatus.is_active() {
+                    if env.read_fs() == ExtensionStatus::Disabled {
                         return Err(ExceptionCause::IllegalInstruction);
                     }
                     return Ok(self.read_fflags());
                 }
                 0x002 => {
-                    if !self.fstatus.is_active() {
+                    if env.read_fs() == ExtensionStatus::Disabled {
                         return Err(ExceptionCause::IllegalInstruction);
                     }
                     return Ok(self.read_frm());
                 }
                 0x003 => {
-                    if !self.fstatus.is_active() {
+                    if env.read_fs() == ExtensionStatus::Disabled {
                         return Err(ExceptionCause::IllegalInstruction);
                     }
                     return Ok(self.read_fcsr());
@@ -2013,19 +2025,19 @@ impl<F: FloatBits> Cpu<F> {
             #[allow(clippy::unit_arg)]
             match csr_number {
                 0x001 => {
-                    if !self.fstatus.is_active() {
+                    if env.read_fs() == ExtensionStatus::Disabled {
                         return Err(ExceptionCause::IllegalInstruction);
                     }
                     return Ok(self.write_fflags(new_value));
                 }
                 0x002 => {
-                    if !self.fstatus.is_active() {
+                    if env.read_fs() == ExtensionStatus::Disabled {
                         return Err(ExceptionCause::IllegalInstruction);
                     }
                     return Ok(self.write_frm(new_value));
                 }
                 0x003 => {
-                    if !self.fstatus.is_active() {
+                    if env.read_fs() == ExtensionStatus::Disabled {
                         return Err(ExceptionCause::IllegalInstruction);
                     }
                     return Ok(self.write_fcsr(new_value));
@@ -2050,14 +2062,6 @@ impl<F: FloatBits> Cpu<F> {
     pub fn read_fcsr(&self) -> u32 {
         F::read_csr(&self.fcsr) as u32
     }
-    /// Read the `FS` bits for the `mstatus`/`sstatus` CSR.
-    ///
-    /// These allow you to efficiently track whether the floating point state
-    /// has been changed. See the privileged RISC-V spec or
-    /// [`write_float_status`](Self::write_float_status) for more information.
-    pub fn read_float_status(&self) -> u8 {
-        self.fstatus.get_bits()
-    }
     /// Write the `fflags` CSR, changing the accumulated exception flags for
     /// floating point operations.
     pub fn write_fflags(&mut self, new_value: u32) {
@@ -2076,20 +2080,6 @@ impl<F: FloatBits> Cpu<F> {
     /// accumulated exceptions for floating point operations.
     pub fn write_fcsr(&mut self, new_value: u32) {
         F::write_csr(&mut self.fcsr, new_value as u8)
-    }
-    /// Write the `FS` bits for the `mstatus`/`sstatus` CSR.
-    ///
-    /// - `0b00`: Floating point is (temporarily?) disabled
-    /// - `0b01`: "Initial"—floating point is in some software-defined pristine
-    ///   state
-    /// - `0b10`: "Clean"—floating point is whatever it was when the software
-    ///   wrote this value
-    /// - `0b11`: "Dirty"—some part of floating point state has changed since
-    ///   `0b01` or `0b10` was written
-    ///
-    /// See the RISC-V privileged spec for more information.
-    pub fn write_float_status(&mut self, new_value: u8) {
-        self.fstatus.set_bits(new_value & 0b11);
     }
 }
 
