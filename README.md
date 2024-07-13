@@ -1,4 +1,4 @@
-RISC-V is a powerful, elegant CPU instruction set architecture that is also an open standard. `rrv32` is a crate providing a software implementation of this architecture. You can use it to create a 32-bit RISC-V emulator. It is intended to form the core of the (yet unreleased) `tatsui` crate, which will provide a batteries-included drop-in computer system for use in computer games.
+RISC-V is a powerful, elegant CPU instruction set architecture that is also an open standard. `rrv32` is a crate providing a software implementation of this architecture. You can use it to create a 32-bit RISC-V emulator. It is intended to form the core of the (yet unreleased) `tatsui` crate, which will provide a batteries-included drop-in computer system for use in computer games and education.
 
 `rrv32` supports all of RV32GCQ_Zicsr_Zifence. To unpack that one piece at a time:
 
@@ -26,7 +26,7 @@ When teaching, I find it useful to have my own implementation of a given ISA han
 
 I also like it when games have real computers in them. Games like _Stationeers_, _Duskers_, _Hacknet_ have simulated computers in them, but they always come with their own limitations and concessions. Lua or JavaScript are often used to bridge this gap, but the experience of writing a Lua script against a game engine is *very* different from that of writing code (even Lua code!) that runs on a real microcontroller.
 
-If there were a permissibly-licensed, freely-available library that provided a self-contained "real" computer system, the barrier to entry is significantly lowered for including "real" computer systems in games. My W65C02S emulators technically already provide this, but, shockingly, nobody wants to program 6502 assembly in games. With a modular RISC-V simulator, programming in C or even a language like Rust becomes possible.
+A permissibly-licensed, freely-available library that provides a self-contained "real" computer system significantly lowers the barrier to entry for including "real" computer systems in games. My W65C02S emulators technically already provide this, but, shockingly, almost nobody wants to program 6502 assembly in games. With a modular RISC-V simulator, programming in C or even a language like Rust becomes possible.
 
 This crate doesn't provide its own execution environment, assembler, linker, or compiler. One thing at a time. :)
 
@@ -41,8 +41,8 @@ Implement the `ExecutionEnvironment` trait. At minimum, this requires you to def
 
 Now all you must do is:
 
-- Instantiate `Cpu<()>`, `Cpu<u32>`, `Cpu<u64>`, or `Cpu<u128>`, depending on whether you want to support no floats, 32-bit floats, 64-bit floats, or 128-bit floats, respectively. (When in doubt, use `Cpu<u64>`.)
-- Set the PC of the `Cpu` using `cpu.put_pc`.
+- Instantiate `Rv32I`, `Rv32IF`, `Rv32G`, or `Rv32GQ`, depending on whether you want to support no floats, 32-bit floats, 64-bit floats, or 128-bit floats, respectively. (When in doubt, use `Rv32G`.)
+- Set the PC using `cpu.put_pc`.
 - Call `cpu.step` a bunch of times with a mutable reference to your `ExecutionEnvironment`.
 
 Oh, and don't forget to have some kind of program loaded in the memory space created by your `ExecutionEnvironment`, or nothing interesting will happen. :)
@@ -58,6 +58,8 @@ By default, the `C` and `float` features are enabled and the `serde` feature is 
 ## `C`
 
 Compiles in code relating to the `C` (compressed instructions) extension. You can disable `C` support without removing this feature flag, removing it just saves a little compile time in the case where you *know* you will never want the `C` extension.
+
+(The `C` extension has nothing at all to do with the C programming language.)
 
 ## `float`
 
@@ -87,12 +89,12 @@ Full support. The burden of implementing reserved load/store is on your `Executi
 
 F/D/Q support depends on the specialization of `Cpu`.
 
-- `Cpu<()>`: Default. No floating point support. CPU state is 128 bytes.
-- `Cpu<u32>`: F (single precision) support only. CPU state is 260 bytes.
-- `Cpu<u64>`: D (double precision) and F support. CPU state is 388 or 392 bytes depending on your architecture.
-- `Cpu<u128>`: Q (quad precision) and D and F support. CPU state is 644, 648, or 656 bytes depending on your architecture.
+- `pub type Rv32I = Cpu<()>;`: Default. No floating point support. CPU state is 128 bytes.
+- `pub type Rv32IF = Cpu<u32>;`: F (single precision) support only. CPU state is 260 bytes.
+- `pub type Rv32G = Cpu<u64>;`: D (double precision) and F support. CPU state is 388 or 392 bytes depending on your architecture. (When in doubt, use this one.)
+- `pub type Rv32GQ = Cpu<u128>;`: Q (quad precision) and D and F support. CPU state is 644, 648, or 656 bytes depending on your architecture.
 
-G requires D, so to actually simulate RV32G, make sure you specify `Cpu<u64>`.
+(If future versions of this crate support RV32E or RV64, manually specializing `Cpu` yourself may be deprecated. The type aliases given above will always work.)
 
 Double- and quad-precision floating point loads and stores are NOT ATOMIC. This is allowed by the standard, at least for 32-bit cores. They also only require 4-byte alignment. This simulator doesn't provide a way to fault on non-8-byte-aligned double loads and stores. If you need that behavior for some reason, sorry!
 

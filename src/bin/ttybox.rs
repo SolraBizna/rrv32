@@ -116,7 +116,7 @@ fn main() {
         .unwrap();
     let mut env = BoxSpace::new();
     ipl::initial_program_load(env.ram_mut(), BufReader::new(infile)).unwrap();
-    let mut cpu = Cpu::<()>::new();
+    let mut cpu = Rv32G::new();
     loop {
         cpu.step(&mut env).unwrap();
     }

@@ -5,6 +5,15 @@ pub use cpu::*;
 mod execution;
 pub use execution::*;
 
+/// 32-bit RISC-V CPU with no float support.
+pub type Rv32I = Cpu<()>;
+/// 32-bit RISC-V CPU with 32-bit float support.
+pub type Rv32IF = Cpu<u32>;
+/// 32-bit RISC-V CPU with 64-bit float support.
+pub type Rv32G = Cpu<u64>;
+/// 32-bit RISC-V CPU with 128-bit float support.
+pub type Rv32GQ = Cpu<u128>;
+
 /// The value that should be returned when the `mvendorid` CSR is read.
 ///
 /// This is defined as 0, indicating that we are an open source
