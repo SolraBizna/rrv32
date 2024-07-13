@@ -1,18 +1,18 @@
 RISC-V is a powerful, elegant CPU instruction set architecture that is also an open standard. `rrv32` is a crate providing a software implementation of this architecture. You can use it to create a 32-bit RISC-V emulator. It is intended to form the core of the (yet unreleased) `tatsui` crate, which will provide a batteries-included drop-in computer system for use in computer games and education.
 
-`rrv32` supports all of RV32GCQ_Zicsr_Zifence. To unpack that one piece at a time:
+`rrv32` supports all of RV32GQC. To unpack that one piece at a time:
 
 - RV32: 32-bit version of the RISC-V ISA. 32-bit address space, 32-bit general purpose registers, 32-bit ALU, 32-bit data bus.
-- G: Shorthand for IMAFD. The bare minimum subset of the architecture considered good enough for a "full computer" (something you would expect to be able to run Linux on, for example).
+- G: Shorthand for IMAFD_Zicsr_Zifence. The bare minimum subset of the architecture considered good enough for a "full computer" (something you would expect to be able to run Linux on, for example).
   - I: Version of the basic instruction set that has 31 general purpose registers. (As opposed to E, which has only 15.)
   - M: Multiplication and division instructions.
   - A: Atomic memory operations.
   - F: 32-bit floating point instructions.
   - D: 64-bit floating point instructions.
+  - Zicsr: Instructions for reading and writing hardware "control and status registers".
+  - Zifencei: An instruction that informs the CPU's instruction cache that some instructions stored in the instruction cache may no longer be valid (because the memory underlying them has changed).
 - C: Support for compressing certain common instructions into 16 bits, significantly reducing program size. (As opposed to every instruction taking up an entire 32 bits.)
 - Q: 128-bit floating point instructions.
-- Zicsr: Instructions for reading and writing hardware "control and status registers".
-- Zifence: An instruction that informs the CPU's instruction cache that some instructions stored in the instruction cache may no longer be valid (because the memory underlying them has changed).
 
 `rrv32` does not implement anything outside of the purview of these standards. In particular, it only implements components of the RISC-V *unprivileged* specification. While it does not contain any implementation of the RISC-V *privileged* specification, it is carefully designed such that your `ExecutionEnvironment` can provide a full implementation of the privileged specification—or any other paradigm you care to imagine that fills the same role.
 
@@ -124,7 +124,7 @@ I haven't implemented this extension, but I will if anyone wants it.
 
 Fully implemented. If you need any CSRs other than the floating point ones, your `ExecutionEnvironment` is in charge of implementing the individual registers. `rrv32` implements every `CSR*` instruction, and provides an easy-to-implement interface for defining new CSRs in your `ExecutionEnvironment` without having to worry about which variants of which `CSR*` instructions should be read- or write-only or which bit operation is supposed to be used etc.
 
-## Zifence (`IFENCE` instruction)
+## Zifencei (`IFENCE` instruction)
 
 Implemented as a no-op.
 

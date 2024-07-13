@@ -5,7 +5,7 @@ edition = "2021"
 default-run = "ttybox"
 license = "MIT OR Apache-2.0"
 authors = ["Solra Bizna <solra@bizna.name>"]
-description = "A modular RV32GCQ implementation in Rust"
+description = "A modular RV32GQC implementation in Rust"
 repository = "https://github.com/SolraBizna/rrv32"
 
 [dependencies]
