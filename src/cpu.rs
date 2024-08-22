@@ -80,7 +80,7 @@ pub const REGISTER_T6: u32 = 31;
 
 /// Exceptions that can occur during execution of an instruction. Values
 /// correspond to `mcause` values from the RISC-V privileged spec.
-#[repr(i32)]
+#[repr(u32)]
 #[derive(Debug)]
 #[allow(unused)]
 pub enum ExceptionCause {
