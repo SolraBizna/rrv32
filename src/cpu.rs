@@ -219,7 +219,7 @@ impl<F: FloatBits> Cpu<F> {
     /// jump that *would have* caused the trap, but if you `put_pc` a
     /// misaligned value, it will contain the misaligned value instead. This is
     /// a condition that can only be created by a mistake in your code!)
-    pub fn put_pc(&mut self, new_pc: u32) {
+    pub fn set_pc(&mut self, new_pc: u32) {
         self.registers[0] = new_pc & !1;
     }
     /// Get the value of a general purpose register, in the range 0-31.
@@ -243,7 +243,7 @@ impl<F: FloatBits> Cpu<F> {
     ///
     /// We provide symbolic constants named according to the standard RISC-V
     /// ABI for convenience, see e.g. [`REGISTER_SP`].
-    pub fn put_register(&mut self, index: u32, value: u32) {
+    pub fn set_register(&mut self, index: u32, value: u32) {
         if (1..32).contains(&index) {
             self.registers[index as usize] = value;
         } else if index == 0 {
@@ -278,7 +278,7 @@ impl<F: FloatBits> Cpu<F> {
             0b00010 if rs2 == 0 => {
                 // LR.W
                 let result = map_load(addr, env.load_reserved_word(addr))?;
-                self.put_register(rd, result);
+                self.set_register(rd, result);
                 return Ok(());
             }
             0b00011 => {
@@ -290,7 +290,7 @@ impl<F: FloatBits> Cpu<F> {
                         false => 1, // store failed!
                         true => 0,  // store succeeded!
                     };
-                self.put_register(rd, result);
+                self.set_register(rd, result);
                 return Ok(());
             }
             0b00100 => |mem, reg| {
@@ -334,7 +334,7 @@ impl<F: FloatBits> Cpu<F> {
         let oldmem = map_store(addr, env.read_word(addr, !0))?;
         let newmem = amop(oldmem, src);
         map_store(addr, env.write_word(addr, newmem, !0))?;
-        self.put_register(rd, oldmem);
+        self.set_register(rd, oldmem);
         Ok(())
     }
     /// Error result is `(mcause, mtval)`.
@@ -412,12 +412,12 @@ impl<F: FloatBits> Cpu<F> {
                         illegal!()
                     }
                     let rd = extract!((4..2)) + 8;
-                    self.put_register(
+                    self.set_register(
                         rd,
                         self.get_register(2).wrapping_add(offset),
                     );
                     env.account_generic_op();
-                    self.put_pc(this_pc.wrapping_add(2));
+                    self.set_pc(this_pc.wrapping_add(2));
                     return Ok(());
                 }
                 (0b001, 0b00) => {
@@ -464,11 +464,11 @@ impl<F: FloatBits> Cpu<F> {
                     // ADDI
                     let rd = extract!((11..7));
                     let imm = assemble!(0, (~12..12)->5, (6..2)->0);
-                    self.put_register(
+                    self.set_register(
                         rd,
                         self.get_register(rd).wrapping_add(imm),
                     );
-                    self.put_pc(self.get_pc().wrapping_add(2));
+                    self.set_pc(self.get_pc().wrapping_add(2));
                     env.account_generic_op();
                     return Ok(());
                 }
@@ -476,8 +476,8 @@ impl<F: FloatBits> Cpu<F> {
                     // JAL
                     // what the
                     let imm = assemble!(0, (~12..12)->11, (11..11)->4, (10..9)->8, (8..8)->10, (7..7)->6, (6..6)->7, (5..3)->1, (2..2)->5);
-                    self.put_register(1, this_pc.wrapping_add(2));
-                    self.put_pc(self.get_pc().wrapping_add(imm) & !1);
+                    self.set_register(1, this_pc.wrapping_add(2));
+                    self.set_pc(self.get_pc().wrapping_add(imm) & !1);
                     env.account_jump_op();
                     return Ok(());
                 }
@@ -485,8 +485,8 @@ impl<F: FloatBits> Cpu<F> {
                     // LI
                     let imm = assemble!(0, (~12..12)->5, (6..2)->0);
                     let rd = extract!((11..7));
-                    self.put_register(rd, imm);
-                    self.put_pc(this_pc.wrapping_add(2));
+                    self.set_register(rd, imm);
+                    self.set_pc(this_pc.wrapping_add(2));
                     env.account_generic_op();
                     return Ok(());
                 }
@@ -495,11 +495,11 @@ impl<F: FloatBits> Cpu<F> {
                     if rd == 2 {
                         // ADDI16SP
                         let imm = assemble!(0, (~12..12)->9, (6..6)->4, (5..5)->6, (4..3)->7, (2..2)->5);
-                        self.put_register(
+                        self.set_register(
                             2,
                             self.get_register(2).wrapping_add(imm),
                         );
-                        self.put_pc(this_pc.wrapping_add(2));
+                        self.set_pc(this_pc.wrapping_add(2));
                         env.account_generic_op();
                         return Ok(());
                     } else {
@@ -508,8 +508,8 @@ impl<F: FloatBits> Cpu<F> {
                         if imm == 0 {
                             illegal!()
                         }
-                        self.put_register(rd, imm);
-                        self.put_pc(this_pc.wrapping_add(2));
+                        self.set_register(rd, imm);
+                        self.set_pc(this_pc.wrapping_add(2));
                         env.account_generic_op();
                         return Ok(());
                     }
@@ -525,11 +525,11 @@ impl<F: FloatBits> Cpu<F> {
                                 illegal!()
                             }
                             let amt = extract!((6..2));
-                            self.put_register(
+                            self.set_register(
                                 rd,
                                 self.get_register(rd) >> amt as i32,
                             );
-                            self.put_pc(this_pc.wrapping_add(2));
+                            self.set_pc(this_pc.wrapping_add(2));
                             env.account_generic_op();
                             return Ok(());
                         }
@@ -539,20 +539,20 @@ impl<F: FloatBits> Cpu<F> {
                                 illegal!()
                             }
                             let amt = extract!((6..2));
-                            self.put_register(
+                            self.set_register(
                                 rd,
                                 (self.get_register(rd) as i32 >> amt as i32)
                                     as u32,
                             );
-                            self.put_pc(this_pc.wrapping_add(2));
+                            self.set_pc(this_pc.wrapping_add(2));
                             env.account_generic_op();
                             return Ok(());
                         }
                         2 => {
                             // ANDI
                             let imm = assemble!(0, (~12..12)->5, (6..2)->0);
-                            self.put_register(rd, self.get_register(rd) & imm);
-                            self.put_pc(this_pc.wrapping_add(2));
+                            self.set_register(rd, self.get_register(rd) & imm);
+                            self.set_pc(this_pc.wrapping_add(2));
                             env.account_generic_op();
                             return Ok(());
                         }
@@ -561,29 +561,29 @@ impl<F: FloatBits> Cpu<F> {
                             let (op, rs2) = extract!((6..5), (4..2));
                             let rs2 = rs2 + 8;
                             match op {
-                                0 => self.put_register(
+                                0 => self.set_register(
                                     rd,
                                     self.get_register(rd)
                                         .wrapping_sub(self.get_register(rs2)),
                                 ), // SUB
-                                1 => self.put_register(
+                                1 => self.set_register(
                                     rd,
                                     self.get_register(rd)
                                         ^ self.get_register(rs2),
                                 ), // XOR
-                                2 => self.put_register(
+                                2 => self.set_register(
                                     rd,
                                     self.get_register(rd)
                                         | self.get_register(rs2),
                                 ), // OR
-                                3 => self.put_register(
+                                3 => self.set_register(
                                     rd,
                                     self.get_register(rd)
                                         & self.get_register(rs2),
                                 ), // AND
                                 _ => illegal!(),
                             }
-                            self.put_pc(this_pc.wrapping_add(2));
+                            self.set_pc(this_pc.wrapping_add(2));
                             env.account_generic_op();
                             return Ok(());
                         }
@@ -593,7 +593,7 @@ impl<F: FloatBits> Cpu<F> {
                 (0b101, 0b01) => {
                     // J
                     let imm = assemble!(0, (~12..12)->11, (11..11)->4, (10..9)->8, (8..8)->10, (7..7)->6, (6..6)->7, (5..3)->1, (2..2)->5);
-                    self.put_pc(this_pc.wrapping_add(imm) & !1);
+                    self.set_pc(this_pc.wrapping_add(imm) & !1);
                     env.account_jump_op();
                     return Ok(());
                 }
@@ -602,10 +602,10 @@ impl<F: FloatBits> Cpu<F> {
                     let rs1 = extract!((9..7)) + 8;
                     if self.get_register(rs1) == 0 {
                         let offset = assemble!(0, (~12..12)->8, (11..10)->3, (6..5)->6, (4..3)->1, (2..2)->5);
-                        self.put_pc(this_pc.wrapping_add(offset));
+                        self.set_pc(this_pc.wrapping_add(offset));
                         env.account_branch_op(true, offset & 0x80000000 == 0);
                     } else {
-                        self.put_pc(this_pc.wrapping_add(2));
+                        self.set_pc(this_pc.wrapping_add(2));
                         env.account_branch_op(
                             false,
                             orig_instruction & (1 << 12) != 0,
@@ -618,10 +618,10 @@ impl<F: FloatBits> Cpu<F> {
                     let rs1 = extract!((9..7)) + 8;
                     if self.get_register(rs1) != 0 {
                         let offset = assemble!(0, (~12..12)->8, (11..10)->3, (6..5)->6, (4..3)->1, (2..2)->5);
-                        self.put_pc(this_pc.wrapping_add(offset));
+                        self.set_pc(this_pc.wrapping_add(offset));
                         env.account_branch_op(true, offset & 0x80000000 == 0);
                     } else {
-                        self.put_pc(this_pc.wrapping_add(2));
+                        self.set_pc(this_pc.wrapping_add(2));
                         env.account_branch_op(
                             false,
                             orig_instruction & (1 << 12) != 0,
@@ -635,11 +635,11 @@ impl<F: FloatBits> Cpu<F> {
                         illegal!()
                     }
                     let (rd, shamt) = extract!((11..7), (6..2));
-                    self.put_register(
+                    self.set_register(
                         rd,
                         self.get_register(rd) << shamt as i32,
                     );
-                    self.put_pc(this_pc.wrapping_add(2));
+                    self.set_pc(this_pc.wrapping_add(2));
                     env.account_generic_op();
                     return Ok(());
                 }
@@ -679,15 +679,15 @@ impl<F: FloatBits> Cpu<F> {
                             if rs1 == 0 {
                                 illegal!()
                             }
-                            self.put_pc(self.get_register(rs1) & !1);
+                            self.set_pc(self.get_register(rs1) & !1);
                             env.account_jump_op();
                             return Ok(());
                         }
                         (0, rd, rs2) => {
                             // MV
                             debug_assert!(rs2 != 0);
-                            self.put_register(rd, self.get_register(rs2));
-                            self.put_pc(this_pc.wrapping_add(2));
+                            self.set_register(rd, self.get_register(rs2));
+                            self.set_pc(this_pc.wrapping_add(2));
                             env.account_generic_op();
                             return Ok(());
                         }
@@ -699,8 +699,8 @@ impl<F: FloatBits> Cpu<F> {
                             // JALR
                             debug_assert!(rs1 != 0);
                             let dst = self.get_register(rs1);
-                            self.put_register(1, this_pc.wrapping_add(2));
-                            self.put_pc(dst & !1);
+                            self.set_register(1, this_pc.wrapping_add(2));
+                            self.set_pc(dst & !1);
                             env.account_jump_op();
                             return Ok(());
                         }
@@ -1097,7 +1097,7 @@ impl<F: FloatBits> Cpu<F> {
                         illegal!()
                     }
                 };
-                self.put_register(rd!(), result);
+                self.set_register(rd!(), result);
                 env.account_memory_load(address);
             }
             #[cfg(feature = "float")]
@@ -1183,7 +1183,7 @@ impl<F: FloatBits> Cpu<F> {
                 let alt = op == 0b101 && (instruction & (1 << 30)) != 0;
                 let a = self.get_register(rs1!());
                 let b = imm12!();
-                self.put_register(
+                self.set_register(
                     rd!(),
                     alu_op(alt, op, a, b)
                         .map_err(|x| (x, orig_instruction))?,
@@ -1192,7 +1192,7 @@ impl<F: FloatBits> Cpu<F> {
             }
             0b00101 => {
                 // AUIPC
-                self.put_register(rd!(), this_pc.wrapping_add(imm20!()));
+                self.set_register(rd!(), this_pc.wrapping_add(imm20!()));
                 env.account_alu_op();
             }
             0b01000 => {
@@ -1396,11 +1396,11 @@ impl<F: FloatBits> Cpu<F> {
                         ))
                     }
                 };
-                self.put_register(rd!(), result);
+                self.set_register(rd!(), result);
             }
             0b01101 => {
                 // (LUI)
-                self.put_register(rd!(), imm20!());
+                self.set_register(rd!(), imm20!());
                 env.account_generic_op();
             }
             #[cfg(feature = "float")]
@@ -1674,21 +1674,21 @@ impl<F: FloatBits> Cpu<F> {
                         // FCMP (FEQ, FLT, FLE)
                         match funct3!() {
                             0b000 => float_op!(T; = a, b; {
-                                self.put_register(rd!(), (a <= b) as u32);
+                                self.set_register(rd!(), (a <= b) as u32);
                                 if a.is_nan() || b.is_nan() {
                                     self.accrue_float_exceptions(INVALID_FLAG);
                                 }
                                 env.account_generic_op();
                             }),
                             0b001 => float_op!(T; = a, b; {
-                                self.put_register(rd!(), (a < b) as u32);
+                                self.set_register(rd!(), (a < b) as u32);
                                 if a.is_nan() || b.is_nan() {
                                     self.accrue_float_exceptions(INVALID_FLAG);
                                 }
                                 env.account_generic_op();
                             }),
                             0b010 => float_op!(T; = a, b; {
-                                self.put_register(rd!(), (a == b) as u32);
+                                self.set_register(rd!(), (a == b) as u32);
                                 if a.is_signaling() || b.is_signaling() {
                                     self.accrue_float_exceptions(INVALID_FLAG);
                                 }
@@ -1713,11 +1713,11 @@ impl<F: FloatBits> Cpu<F> {
                                     env.account_fcvt_to_int(T::get_word_count());
                                 });
                                 if dst > i32::MAX as i128 {
-                                    self.put_register(rd!(), i32::MAX as u32);
+                                    self.set_register(rd!(), i32::MAX as u32);
                                 } else if dst < i32::MIN as i128 {
-                                    self.put_register(rd!(), i32::MIN as u32);
+                                    self.set_register(rd!(), i32::MIN as u32);
                                 } else {
-                                    self.put_register(rd!(), dst as u32);
+                                    self.set_register(rd!(), dst as u32);
                                 }
                             }
                             0b00001 => {
@@ -1734,9 +1734,9 @@ impl<F: FloatBits> Cpu<F> {
                                     env.account_fcvt_to_int(T::get_word_count());
                                 });
                                 if dst > u32::MAX as u128 {
-                                    self.put_register(rd!(), u32::MAX);
+                                    self.set_register(rd!(), u32::MAX);
                                 } else {
-                                    self.put_register(rd!(), dst as u32);
+                                    self.set_register(rd!(), dst as u32);
                                 }
                             }
                             _ => illegal!(),
@@ -1769,7 +1769,7 @@ impl<F: FloatBits> Cpu<F> {
                             let a = F::unbox_single(
                                 self.float_registers[rs1!() as usize],
                             );
-                            self.put_register(rd!(), a);
+                            self.set_register(rd!(), a);
                             env.account_generic_op();
                         }
                         (0b00000, 0b001) => {
@@ -1790,7 +1790,7 @@ impl<F: FloatBits> Cpu<F> {
                                 else if a.is_pos_infinity() { o |= 1<<7 }
                                 else if a.is_signaling() { o |= 1<<8 }
                                 else { o |= 1<<9 }
-                                self.put_register(rd!(), o);
+                                self.set_register(rd!(), o);
                                 env.account_generic_op();
                             });
                         }
@@ -1844,14 +1844,14 @@ impl<F: FloatBits> Cpu<F> {
                 }
                 let offset = imm12!();
                 let base = self.get_register(rs1!());
-                self.put_register(rd!(), next_pc);
+                self.set_register(rd!(), next_pc);
                 next_pc = base.wrapping_add(offset) & !1;
                 env.account_jump_op();
             }
             0b11011 => {
                 // JAL
                 let offset = imm_j!();
-                self.put_register(rd!(), next_pc);
+                self.set_register(rd!(), next_pc);
                 next_pc = this_pc.wrapping_add(offset);
                 env.account_jump_op();
             }
@@ -1931,7 +1931,7 @@ impl<F: FloatBits> Cpu<F> {
                         self.write_csr(env, csr!(), new_value)
                             .map_err(|x| (x, orig_instruction))?;
                     }
-                    self.put_register(rd!(), old_value);
+                    self.set_register(rd!(), old_value);
                 } else {
                     illegal!()
                 }
@@ -1946,7 +1946,7 @@ impl<F: FloatBits> Cpu<F> {
         if (next_pc & 2 == 0) || (Env::SUPPORT_C && env.enable_c()) {
             // the lowest bit is supposed to be ignored, and it's hard to get a
             // 1 in there anyway
-            self.put_pc(next_pc & !1);
+            self.set_pc(next_pc & !1);
             Ok(())
         } else {
             Err((ExceptionCause::MisalignedPC, next_pc))

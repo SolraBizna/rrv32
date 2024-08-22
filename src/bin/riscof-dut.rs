@@ -516,7 +516,7 @@ fn run_inner<F: FloatBits, const A: bool, const M: bool, const C: bool>(
     mut elfo: Elfo<A, M, C>,
 ) {
     let mut cpu = rrv32::Cpu::<F>::new();
-    cpu.put_pc(elfo.entry_point);
+    cpu.set_pc(elfo.entry_point);
     loop {
         match cpu.step(&mut elfo) {
             Ok(_) => (),
